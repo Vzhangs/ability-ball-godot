@@ -1,0 +1,26 @@
+; Engine configuration file.
+; Generated for the original Ability Ball Lab project.
+
+config_version=5
+
+[application]
+
+config/name="Ability Ball Lab"
+run/main_scene="res://scenes/main.tscn"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+textures/canvas_textures/default_texture_filter=0
