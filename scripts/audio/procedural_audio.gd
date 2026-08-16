@@ -3,6 +3,8 @@ extends Node
 
 const SAMPLE_RATE := 44100.0
 const MAX_VOICES := 14
+const GENERATOR_BUFFER_LENGTH := 0.05
+const AUDIO_PROCESS_PRIORITY := 100
 
 var _player: AudioStreamPlayer
 var _playback: AudioStreamGeneratorPlayback
@@ -10,13 +12,14 @@ var _voices: Array[Dictionary] = []
 var _noise := RandomNumberGenerator.new()
 
 func _ready() -> void:
+	process_priority = AUDIO_PROCESS_PRIORITY
 	if DisplayServer.get_name() == "headless":
 		set_process(false)
 		return
 	_noise.seed = 20260815
 	var generator := AudioStreamGenerator.new()
 	generator.mix_rate = SAMPLE_RATE
-	generator.buffer_length = 0.25
+	generator.buffer_length = GENERATOR_BUFFER_LENGTH
 	_player = AudioStreamPlayer.new()
 	_player.stream = generator
 	_player.volume_db = -7.0
@@ -37,6 +40,14 @@ func shutdown() -> void:
 		_player.stream = null
 
 func play_event(kind: String, strength: float = 1.0) -> void:
+	var voice := event_profile(kind, strength)
+	if voice.is_empty():
+		return
+	_voices.append(voice)
+	while _voices.size() > MAX_VOICES:
+		_voices.pop_front()
+
+func event_profile(kind: String, strength: float = 1.0) -> Dictionary:
 	var voice := {
 		"age": 0.0,
 		"duration": 0.13,
@@ -46,6 +57,9 @@ func play_event(kind: String, strength: float = 1.0) -> void:
 		"strength": clampf(strength, 0.0, 1.0),
 		"wave": "sine",
 		"noise": 0.0,
+		"attack": 0.0,
+		"transient": 0.0,
+		"transient_duration": 0.012,
 	}
 	match kind:
 		"impact":
@@ -53,6 +67,16 @@ func play_event(kind: String, strength: float = 1.0) -> void:
 			voice["frequency"] = 145.0
 			voice["frequency_end"] = 58.0
 			voice["noise"] = 0.2
+		"body_impact":
+			voice["duration"] = 0.14
+			voice["frequency"] = 230.0
+			voice["frequency_end"] = 72.0
+			voice["phase"] = PI * 0.5
+			voice["wave"] = "triangle"
+			voice["noise"] = 0.12
+			voice["attack"] = 0.001
+			voice["transient"] = 0.52
+			voice["transient_duration"] = 0.009
 		"volley":
 			voice["duration"] = 0.13
 			voice["frequency"] = 235.0
@@ -65,6 +89,9 @@ func play_event(kind: String, strength: float = 1.0) -> void:
 			voice["frequency_end"] = 225.0
 			voice["wave"] = "triangle"
 			voice["noise"] = 0.24
+			voice["attack"] = 0.0008
+			voice["transient"] = 0.22
+			voice["transient_duration"] = 0.006
 		"split":
 			voice["duration"] = 0.24
 			voice["frequency"] = 255.0
@@ -72,17 +99,24 @@ func play_event(kind: String, strength: float = 1.0) -> void:
 			voice["wave"] = "triangle"
 			voice["noise"] = 0.035
 		"clone_impact":
-			voice["duration"] = 0.095
-			voice["frequency"] = 275.0
-			voice["frequency_end"] = 105.0
+			voice["duration"] = 0.085
+			voice["frequency"] = 360.0
+			voice["frequency_end"] = 130.0
+			voice["phase"] = PI * 0.5
 			voice["wave"] = "triangle"
-			voice["noise"] = 0.2
+			voice["noise"] = 0.12
+			voice["attack"] = 0.001
+			voice["transient"] = 0.3
+			voice["transient_duration"] = 0.007
 		"ram_impact":
-			voice["duration"] = 0.18
-			voice["frequency"] = 128.0
-			voice["frequency_end"] = 43.0
+			voice["duration"] = 0.15
+			voice["frequency"] = 205.0
+			voice["frequency_end"] = 60.0
 			voice["wave"] = "saw"
-			voice["noise"] = 0.28
+			voice["noise"] = 0.16
+			voice["attack"] = 0.001
+			voice["transient"] = 0.45
+			voice["transient_duration"] = 0.01
 		"judgment":
 			voice["duration"] = 0.28
 			voice["frequency"] = 880.0
@@ -102,14 +136,13 @@ func play_event(kind: String, strength: float = 1.0) -> void:
 			voice["wave"] = "saw"
 			voice["noise"] = 0.09
 		_:
-			return
-	_voices.append(voice)
-	while _voices.size() > MAX_VOICES:
-		_voices.pop_front()
+			return {}
+	return voice
 
 func supports_event(kind: String) -> bool:
 	return kind in [
 		"impact",
+		"body_impact",
 		"volley",
 		"projectile_hit",
 		"split",
@@ -137,10 +170,17 @@ func _process(_delta: float) -> void:
 			var frequency := lerpf(float(voice["frequency"]), float(voice["frequency_end"]), progress)
 			var phase: float = voice["phase"]
 			var wave := _wave_value(String(voice["wave"]), phase)
+			var attack_duration: float = voice["attack"]
 			var envelope := sin(progress * PI) * exp(-progress * 2.25)
+			if attack_duration > 0.0:
+				var attack_gain := minf(1.0, age / attack_duration)
+				envelope = attack_gain * exp(-progress * 3.4)
 			var noise_amount: float = voice["noise"]
 			wave = lerpf(wave, _noise.randf_range(-1.0, 1.0), noise_amount)
-			mixed += wave * envelope * float(voice["strength"]) * 0.48
+			var transient_duration: float = voice["transient_duration"]
+			var transient_envelope := exp(-age / maxf(1.0 / SAMPLE_RATE, transient_duration))
+			var transient := _noise.randf_range(-1.0, 1.0) * float(voice["transient"]) * transient_envelope
+			mixed += (wave * envelope + transient) * float(voice["strength"]) * 0.48
 			voice["phase"] = fmod(phase + TAU * frequency / SAMPLE_RATE, TAU)
 			voice["age"] = age + 1.0 / SAMPLE_RATE
 			_voices[index] = voice

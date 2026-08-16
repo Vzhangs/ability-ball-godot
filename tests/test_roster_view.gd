@@ -21,7 +21,7 @@ func _run() -> void:
 	var ids := BallRegistry.ids()
 	for index in range(0, ids.size(), 2):
 		var view: BattleView = BattleViewScript.new()
-		view.size = Vector2(650.0, 650.0)
+		view.size = BattleViewScript.DEFAULT_VIEW_SIZE
 		get_root().add_child(view)
 		view.start_battle(20260815 + index, ids[index], ids[index + 1])
 		view.simulation.step(BattleSimulation.FIXED_STEP)
@@ -42,20 +42,27 @@ func _run() -> void:
 
 func _check_viewport_margin() -> void:
 	var view: BattleView = BattleViewScript.new()
-	view.size = Vector2(650.0, 650.0)
+	view.size = BattleViewScript.DEFAULT_VIEW_SIZE
 	var visible_world := view.visible_world_size()
 	var arena_rect := view.arena_screen_rect()
+	var horizontal_visible_ratio := visible_world.x / BattleSimulation.DEFAULT_ARENA_SIZE.x
+	var vertical_visible_ratio := visible_world.y / BattleSimulation.DEFAULT_ARENA_SIZE.y
+	_check(not is_equal_approx(view.size.x, view.size.y), "战斗外层画布使用非正方形布局")
 	_check(is_equal_approx(visible_world.x / BattleSimulation.DEFAULT_ARENA_SIZE.x, 1.2), "游戏世界视野宽度为碰撞场地的 120%")
-	_check(is_equal_approx(visible_world.y / BattleSimulation.DEFAULT_ARENA_SIZE.y, 1.2), "游戏世界视野高度为碰撞场地的 120%")
+	_check(horizontal_visible_ratio >= 1.2 and vertical_visible_ratio >= 1.2, "矩形画布在两个方向都保留至少 120% 可视世界")
 	_check(arena_rect.position.x > 0.0 and arena_rect.position.y > 0.0, "碰撞盒四周保留可视窗口留白")
 	_check(arena_rect.end.x < view.size.x and arena_rect.end.y < view.size.y, "碰撞盒边界与窗口裁切边界相互独立")
 	_check(is_equal_approx(arena_rect.size.x / view.size.x, 1.0 / 1.2), "碰撞盒在窗口内按 1:1.2 比例显示")
+	_check(
+		arena_rect.position.y - BattleViewScript.HEALTH_PANEL_BOTTOM >= BattleViewScript.HUD_ARENA_GAP,
+		"顶部血条面板和竞技场内容区之间保留固定空隙"
+	)
 	view.start_battle(20260914, "splitter", "heaven", 85.0, Vector2(900.0, 500.0))
 	visible_world = view.visible_world_size()
 	arena_rect = view.arena_screen_rect()
 	_check(view.simulation.arena_size() == Vector2(900.0, 500.0), "自定义竞技场尺寸进入真实战斗视图")
 	_check(is_equal_approx(visible_world.x / 900.0, 1.2), "自定义竞技场保持横向 120% 可视世界")
-	_check(is_equal_approx(visible_world.y / 500.0, 1.2), "自定义竞技场保持纵向 120% 可视世界")
+	_check(visible_world.y / 500.0 >= 1.2, "矩形外层允许在纵向保留更多展示空间")
 	_check(is_equal_approx(arena_rect.size.x / arena_rect.size.y, 900.0 / 500.0), "碰撞白框按自定义宽高比绘制")
 	view.free()
 
@@ -109,7 +116,7 @@ func _check_global_settings_dialog() -> void:
 
 func _check_replicator_dual_ring_view() -> void:
 	var view: BattleView = BattleViewScript.new()
-	view.size = Vector2(650.0, 650.0)
+	view.size = BattleViewScript.DEFAULT_VIEW_SIZE
 	get_root().add_child(view)
 	view.start_battle(20260906, "replicator", "laser")
 	for _activation in range(22):
@@ -137,7 +144,7 @@ func _check_replicator_dual_ring_view() -> void:
 
 func _check_splitter_swarm_view() -> void:
 	var view: BattleView = BattleViewScript.new()
-	view.size = Vector2(650.0, 650.0)
+	view.size = BattleViewScript.DEFAULT_VIEW_SIZE
 	get_root().add_child(view)
 	view.start_battle(20260831, "splitter", "laser")
 	for _activation in range(40):
@@ -178,7 +185,7 @@ func _check_splitter_swarm_view() -> void:
 	await process_frame
 
 	var right_view: BattleView = BattleViewScript.new()
-	right_view.size = Vector2(650.0, 650.0)
+	right_view.size = BattleViewScript.DEFAULT_VIEW_SIZE
 	get_root().add_child(right_view)
 	right_view.start_battle(20260901, "laser", "splitter")
 	for _activation in range(2):

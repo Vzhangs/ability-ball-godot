@@ -8,6 +8,8 @@ const BallSettingsDialogScript := preload("res://scripts/ui/ball_settings_dialog
 const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
 const GlobalSettingsStoreScript := preload("res://scripts/settings/global_settings_store.gd")
 const GlobalSettingsDialogScript := preload("res://scripts/ui/global_settings_dialog.gd")
+const BATTLE_VIEW_POSITION := Vector2(35.0, 190.0)
+const RESULT_VIEW_GAP := 18.0
 
 var battle_view
 var seed_value := 20260815
@@ -107,8 +109,8 @@ func _replace_battle_view() -> void:
 		remove_child(battle_view)
 		battle_view.queue_free()
 	battle_view = BattleViewScript.new()
-	battle_view.position = Vector2(35.0, 190.0)
-	battle_view.size = Vector2(650.0, 650.0)
+	battle_view.position = BATTLE_VIEW_POSITION
+	battle_view.size = BattleViewScript.DEFAULT_VIEW_SIZE
 	add_child(battle_view)
 	battle_view.start_battle(
 		seed_value,
@@ -132,7 +134,10 @@ func _update_title() -> void:
 
 func _build_result_label() -> void:
 	result_label = Label.new()
-	result_label.position = Vector2(35.0, 858.0)
+	result_label.position = Vector2(
+		BATTLE_VIEW_POSITION.x,
+		BATTLE_VIEW_POSITION.y + BattleViewScript.DEFAULT_VIEW_SIZE.y + RESULT_VIEW_GAP
+	)
 	result_label.size = Vector2(650.0, 36.0)
 	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	result_label.add_theme_font_size_override("font_size", 17)

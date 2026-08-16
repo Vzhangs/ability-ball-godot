@@ -15,7 +15,6 @@ var sound_kind := "impact"
 var sort_order := 0
 var ability_script: Script
 var visual_script: Script
-var _profiles := {}
 var _setting_specs := {}
 var _setting_values := {}
 
@@ -59,30 +58,19 @@ func _init(config: Dictionary = {}, behavior: Script = null, visual: Script = nu
 	apply_settings({})
 
 func create_ability():
-	return create_profile_ability("default")
-
-func create_profile_ability(profile: String = "default"):
-	var selected_script: Script = ability_script
-	if profile != "default":
-		assert(_profiles.has(profile), "%s has no profile %s" % [id, profile])
-		selected_script = _profiles[profile]["ability"] as Script
-	assert(selected_script != null and selected_script.can_instantiate(), "%s/%s ability script cannot instantiate" % [id, profile])
-	var ability = selected_script.new()
+	assert(ability_script != null and ability_script.can_instantiate(), "%s ability script cannot instantiate" % id)
+	var ability = ability_script.new()
 	ability.configure(self)
 	return ability
 
-func create_visual(runtime_ability: BallAbility = null, profile: String = "default"):
-	var selected_script: Script = visual_script
-	if profile != "default":
-		assert(_profiles.has(profile), "%s has no profile %s" % [id, profile])
-		selected_script = _profiles[profile]["visual"] as Script
-	assert(selected_script != null and selected_script.can_instantiate(), "%s/%s visual script cannot instantiate" % [id, profile])
-	var visual = selected_script.new()
+func create_visual(runtime_ability: BallAbility = null):
+	assert(visual_script != null and visual_script.can_instantiate(), "%s visual script cannot instantiate" % id)
+	var visual = visual_script.new()
 	visual.configure(self, runtime_ability)
 	return visual
 
-func fighter_spec(profile: String = "default") -> Dictionary:
-	var result := {
+func fighter_spec() -> Dictionary:
+	return {
 		"id": id,
 		"name": display_name,
 		"color": color,
@@ -94,31 +82,6 @@ func fighter_spec(profile: String = "default") -> Dictionary:
 		"minimum_speed": speed,
 		"maximum_speed": speed,
 	}
-	if profile != "default":
-		assert(_profiles.has(profile), "%s has no profile %s" % [id, profile])
-		result.merge(_profiles[profile]["fighter"], true)
-		var fighter_settings: Dictionary = _profiles[profile]["fighter_settings"]
-		for field in fighter_settings:
-			result[field] = setting(String(fighter_settings[field]))
-	return result
-
-func register_profile(
-	profile: String,
-	fighter_overrides: Dictionary,
-	behavior: Script,
-	visual: Script = null,
-	fighter_settings: Dictionary = {}
-) -> void:
-	assert(not profile.is_empty() and profile != "default", "Custom ball profile requires a non-default name")
-	_profiles[profile] = {
-		"fighter": fighter_overrides.duplicate(true),
-		"fighter_settings": fighter_settings.duplicate(true),
-		"ability": behavior,
-		"visual": visual if visual != null else visual_script,
-	}
-
-func has_profile(profile: String) -> bool:
-	return profile == "default" or _profiles.has(profile)
 
 func apply_settings(overrides: Dictionary) -> void:
 	for key in _setting_specs:
@@ -201,9 +164,4 @@ func validation_errors() -> PackedStringArray:
 		errors.append("%s has no visual script" % id)
 	elif not visual_script.new() is BallVisual:
 		errors.append("%s visual script must extend BallVisual" % id)
-	for profile in _profiles:
-		for field in _profiles[profile]["fighter_settings"]:
-			var setting_key := String(_profiles[profile]["fighter_settings"][field])
-			if not _setting_specs.has(setting_key):
-				errors.append("%s/%s profile field %s references unknown setting %s" % [id, profile, field, setting_key])
 	return errors

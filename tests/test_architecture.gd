@@ -16,8 +16,6 @@ const CORE_FILES := [
 	"res://scripts/settings/ball_settings_store.gd",
 	"res://scripts/settings/global_game_settings.gd",
 	"res://scripts/settings/global_settings_store.gd",
-	"res://scripts/scenarios/core/battle_scenario.gd",
-	"res://scripts/scenarios/core/scenario_registry.gd",
 	"res://scripts/ui/ball_settings_dialog.gd",
 	"res://scripts/ui/battle_view.gd",
 	"res://scripts/ui/global_settings_dialog.gd",
@@ -45,7 +43,7 @@ func _init() -> void:
 	_check_ball_modules_do_not_reference_each_other()
 	_check_contact_damage_policy()
 	_check_no_global_progression_state()
-	_check_no_scenario_balance_multipliers()
+	_check_no_special_scenarios()
 	_check_public_view_only_draws_generic_contracts()
 	_check_single_engine_entrypoint()
 	_check_floating_text_policy()
@@ -95,8 +93,8 @@ func _check_global_settings_contract() -> void:
 	var specs: Dictionary = settings.setting_specs()
 	_check(specs.size() == 3, "全局 Schema 只包含时限与竞技场宽高")
 	_check(not specs.has("max_hp") and not specs.has("damage"), "全局设置不接管任何球属性")
-	var scenario_source := FileAccess.get_file_as_string("res://scripts/scenarios/core/battle_scenario.gd")
-	_check(not scenario_source.contains("max_battle_time"), "场景不能覆盖全局默认对局时限")
+	var simulation_source := FileAccess.get_file_as_string("res://scripts/simulation/battle_simulation.gd")
+	_check(simulation_source.contains("time_limit_seconds"), "模拟器显式接收全局默认对局时限")
 	var main_source := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_check(main_source.contains("GlobalSettingsStoreScript.load_settings"), "入口启动时加载全局持久化设置")
 	_check(not main_source.contains("time_limit_spin_box"), "入口不保留第二套单局时限输入")
@@ -129,7 +127,6 @@ func _check_no_global_progression_state() -> void:
 	var gameplay_roots := [
 		"res://scripts/simulation",
 		"res://scripts/balls/core",
-		"res://scripts/scenarios",
 		"res://scripts/ui",
 	]
 	var forbidden_pattern := RegEx.new()
@@ -137,18 +134,22 @@ func _check_no_global_progression_state() -> void:
 	for root in gameplay_roots:
 		for file_path in _gd_files_recursive(root):
 			var source := FileAccess.get_file_as_string(file_path)
-			_check(forbidden_pattern.search(source) == null, "公共玩法、场景和视图不得拥有全局阶段：%s" % file_path)
+			_check(forbidden_pattern.search(source) == null, "公共玩法和视图不得拥有全局阶段：%s" % file_path)
 
-func _check_no_scenario_balance_multipliers() -> void:
-	for file_path in _gd_files_recursive("res://scripts/scenarios"):
-		var source := FileAccess.get_file_as_string(file_path)
-		_check(not source.contains("damage_scale"), "场景不得为组合附加伤害平衡倍率：%s" % file_path)
-		_check(not source.contains("recovery_scale"), "场景不得为组合附加回复平衡倍率：%s" % file_path)
+func _check_no_special_scenarios() -> void:
+	_check(not DirAccess.dir_exists_absolute("res://scripts/scenarios"), "源码不保留任何特殊场景目录")
 	var simulation_source := FileAccess.get_file_as_string("res://scripts/simulation/battle_simulation.gd")
+	var module_source := FileAccess.get_file_as_string("res://scripts/balls/core/ball_module.gd")
+	_check(not simulation_source.contains("Scenario"), "通用模拟器不依赖场景注册或匹配")
+	_check(not simulation_source.contains("profile"), "通用模拟器不按组合选择球档案")
+	_check(not module_source.contains("register_profile"), "球模块只保留唯一能力实现")
+	_check(not module_source.contains("create_profile_ability"), "球模块不提供特殊档案能力入口")
+	for ball_id in BallRegistry.ids():
+		for file_path in _gd_files_recursive("res://scripts/balls/%s" % ball_id):
+			var source := FileAccess.get_file_as_string(file_path)
+			_check(not source.contains("showcase"), "球目录不保留特殊场景实现：%s" % file_path)
 	_check(simulation_source.contains("const DAMAGE_SCALE := 1.0"), "通用伤害结算使用恒等倍率")
 	_check(simulation_source.contains("const RECOVERY_SCALE := 1.0"), "通用回复结算使用恒等倍率")
-	_check(not simulation_source.contains("scenario.damage_scale"), "模拟器不从场景读取伤害倍率")
-	_check(not simulation_source.contains("scenario.recovery_scale"), "模拟器不从场景读取回复倍率")
 
 func _gd_files_recursive(path: String) -> PackedStringArray:
 	var files := PackedStringArray()
@@ -183,9 +184,6 @@ func _check_floating_text_policy() -> void:
 		for file_path in _gd_files_recursive("res://scripts/balls/%s" % owner_id):
 			var source := FileAccess.get_file_as_string(file_path)
 			_check(not source.contains("spawn_text("), "球模块不得生成说明性浮字，应改用数值、符号或特效：%s" % file_path)
-	for file_path in _gd_files_recursive("res://scripts/scenarios"):
-		var source := FileAccess.get_file_as_string(file_path)
-		_check(not source.contains("spawn_text("), "场景不得生成说明性浮字，应改用符号或特效：%s" % file_path)
 	var simulation_source := FileAccess.get_file_as_string("res://scripts/simulation/battle_simulation.gd")
 	_check(simulation_source.count("spawn_text(") == 4, "战斗核心只保留本体伤害、实体伤害、治疗和通用浮字入口")
 

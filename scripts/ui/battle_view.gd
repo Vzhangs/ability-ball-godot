@@ -5,11 +5,14 @@ signal battle_finished(simulation: BattleSimulation)
 signal combat_event(kind: String, strength: float)
 
 const BattleSimulationScript := preload("res://scripts/simulation/battle_simulation.gd")
+const DEFAULT_VIEW_SIZE := Vector2(650.0, 700.0)
 const VISIBLE_WORLD_SCALE := 1.2
 const HEALTH_BAR_WIDTH := 238.0
 const HEALTH_BAR_HEIGHT := 16.0
 const HEALTH_VALUE_FONT_SIZE := 21
 const HEALTH_NAME_FONT_SIZE := 17
+const HEALTH_PANEL_BOTTOM := 50.0
+const HUD_ARENA_GAP := 20.0
 
 var simulation: BattleSimulation
 var left_visual: BallVisual
@@ -18,7 +21,6 @@ var simulation_speed := 1.0
 var paused := false
 var _accumulator := 0.0
 var _finish_emitted := false
-var _last_contact_hits := 0
 var _last_abilities := {}
 var _font: Font
 var _shake_offset := Vector2.ZERO
@@ -46,11 +48,10 @@ func start_battle(
 		time_limit_seconds,
 		battle_arena_size
 	)
-	left_visual = simulation.left_module.create_visual(simulation.left_ability, simulation.left_profile)
-	right_visual = simulation.right_module.create_visual(simulation.right_ability, simulation.right_profile)
+	left_visual = simulation.left_module.create_visual(simulation.left_ability)
+	right_visual = simulation.right_module.create_visual(simulation.right_ability)
 	_accumulator = 0.0
 	_finish_emitted = false
-	_last_contact_hits = 0
 	_last_abilities.clear()
 	for ball_id in BallRegistry.ids():
 		_last_abilities[ball_id] = 0
@@ -84,9 +85,6 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _check_combat_events() -> void:
-	if int(simulation.stats["contact_hits"]) > _last_contact_hits:
-		combat_event.emit("impact", 0.75)
-	_last_contact_hits = int(simulation.stats["contact_hits"])
 	var abilities: Dictionary = simulation.stats["abilities"]
 	for ball_id in [simulation.left.id, simulation.right.id]:
 		if int(abilities[ball_id]) > int(_last_abilities[ball_id]):
@@ -122,7 +120,7 @@ func _draw() -> void:
 		_draw_result_card()
 
 func visible_world_size() -> Vector2:
-	return _battle_arena_size() * VISIBLE_WORLD_SCALE
+	return size / _scale_factor()
 
 func arena_screen_rect() -> Rect2:
 	return Rect2(_origin(), _battle_arena_size() * _scale_factor())
@@ -132,11 +130,18 @@ func health_hud_bounds(side: int) -> Rect2:
 	return Rect2(Vector2(x, 31.0), Vector2(HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT))
 
 func _scale_factor() -> float:
-	var world_size := visible_world_size()
-	return minf(size.x / world_size.x, size.y / world_size.y)
+	var arena_size := _battle_arena_size()
+	var horizontal_scale := size.x / maxf(1.0, arena_size.x * VISIBLE_WORLD_SCALE)
+	var bottom_margin_scale := (VISIBLE_WORLD_SCALE - 1.0) * 0.5
+	var arena_top := HEALTH_PANEL_BOTTOM + HUD_ARENA_GAP
+	var vertical_space := maxf(1.0, size.y - arena_top)
+	var vertical_scale := vertical_space / maxf(1.0, arena_size.y * (1.0 + bottom_margin_scale))
+	return maxf(0.0001, minf(horizontal_scale, vertical_scale))
 
 func _origin() -> Vector2:
-	return (size - _battle_arena_size() * _scale_factor()) * 0.5
+	var centered_origin := (size - _battle_arena_size() * _scale_factor()) * 0.5
+	centered_origin.y = maxf(centered_origin.y, HEALTH_PANEL_BOTTOM + HUD_ARENA_GAP)
+	return centered_origin
 
 func _battle_arena_size() -> Vector2:
 	return simulation.arena_size() if simulation != null else BattleSimulation.DEFAULT_ARENA_SIZE

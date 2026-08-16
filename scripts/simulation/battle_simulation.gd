@@ -2,7 +2,6 @@ class_name BattleSimulation
 extends RefCounted
 
 const BallBattleContextScript := preload("res://scripts/balls/core/ball_battle_context.gd")
-const ScenarioRegistryScript := preload("res://scripts/scenarios/core/scenario_registry.gd")
 const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
 
 const DEFAULT_ARENA_SIZE := GlobalGameSettingsScript.DEFAULT_ARENA_SIZE
@@ -10,6 +9,13 @@ const DEFAULT_BATTLE_TIME := GlobalGameSettingsScript.DEFAULT_BATTLE_TIME
 const FIXED_STEP := 1.0 / 60.0
 const DAMAGE_SCALE := 1.0
 const RECOVERY_SCALE := 1.0
+const SPAWN_SEED_SALT := 0x6C8E9CF5
+const CONTACT_COOLDOWN := 0.38
+const COLLISION_IMPULSE := 0.92
+const TRAIL_INTERVAL := 0.055
+const ABILITY_TIMER_OFFSET := 0.6
+const LEFT_SPAWN_RATIO := Vector2(0.25, 0.5)
+const RIGHT_SPAWN_RATIO := Vector2(0.75, 0.5)
 
 class FighterState:
 	var id := ""
@@ -57,6 +63,7 @@ class FighterState:
 
 var rng := RandomNumberGenerator.new()
 var visual_rng := RandomNumberGenerator.new()
+var _spawn_rng := RandomNumberGenerator.new()
 var seed_value := 20260815
 var left_id := ""
 var right_id := ""
@@ -73,16 +80,13 @@ var right_module: BallModule
 var left_ability: BallAbility
 var right_ability: BallAbility
 var battle_context
-var scenario
-var left_profile := "default"
-var right_profile := "default"
 var max_battle_time := DEFAULT_BATTLE_TIME
 var _arena_size := DEFAULT_ARENA_SIZE
 var damage_scale := DAMAGE_SCALE
 var recovery_scale := RECOVERY_SCALE
-var contact_cooldown := 0.38
-var collision_impulse := 0.92
-var trail_interval := 0.055
+var contact_cooldown := CONTACT_COOLDOWN
+var collision_impulse := COLLISION_IMPULSE
+var trail_interval := TRAIL_INTERVAL
 
 var impact_rings: Array[Dictionary] = []
 var particles: Array[Dictionary] = []
@@ -114,7 +118,6 @@ func reset(
 	battle_arena_size: Vector2 = DEFAULT_ARENA_SIZE
 ) -> void:
 	assert(BallRegistry.is_valid(), "Ball registry is invalid: %s" % ", ".join(BallRegistry.validation_errors()))
-	assert(ScenarioRegistryScript.validation_errors().is_empty(), "Battle scenario registry is invalid: %s" % ", ".join(ScenarioRegistryScript.validation_errors()))
 	assert(BallRegistry.has_id(new_left), "Unknown left ball id: %s" % new_left)
 	assert(BallRegistry.has_id(new_right), "Unknown right ball id: %s" % new_right)
 	_arena_size = Vector2(
@@ -126,38 +129,36 @@ func reset(
 	right_id = new_right
 	left_module = BallRegistry.get_module(left_id)
 	right_module = BallRegistry.get_module(right_id)
-	scenario = ScenarioRegistryScript.resolve(left_id, right_id)
-	left_profile = scenario.left_profile
-	right_profile = scenario.right_profile
-	assert(left_module.has_profile(left_profile), "%s does not provide scenario profile %s" % [left_id, left_profile])
-	assert(right_module.has_profile(right_profile), "%s does not provide scenario profile %s" % [right_id, right_profile])
-	left_ability = left_module.create_profile_ability(left_profile)
-	right_ability = right_module.create_profile_ability(right_profile)
+	var left_spec: Dictionary = left_module.fighter_spec()
+	var right_spec: Dictionary = right_module.fighter_spec()
+	left_ability = left_module.create_ability()
+	right_ability = right_module.create_ability()
 	battle_context = BallBattleContextScript.new(self)
 	max_battle_time = maxf(FIXED_STEP, time_limit_seconds if time_limit_seconds > 0.0 else DEFAULT_BATTLE_TIME)
 	damage_scale = DAMAGE_SCALE
 	recovery_scale = RECOVERY_SCALE
-	contact_cooldown = scenario.contact_cooldown
-	collision_impulse = scenario.collision_impulse
-	trail_interval = scenario.trail_interval
+	contact_cooldown = CONTACT_COOLDOWN
+	collision_impulse = COLLISION_IMPULSE
+	trail_interval = TRAIL_INTERVAL
 	rng.seed = seed_value
 	visual_rng.seed = seed_value ^ 0x5F3759DF
+	_spawn_rng.seed = seed_value ^ SPAWN_SEED_SALT
 	elapsed = 0.0
 	finished = false
 	winner_id = ""
 	winner_side = ""
 	finish_reason = ""
 	left = FighterState.new(
-		left_module.fighter_spec(left_profile),
-		_scaled_spawn_position(scenario.left_spawn_position),
-		scenario.left_spawn_velocity.rotated(rng.randf_range(-0.16, 0.16) if scenario.randomize_spawn_angle else 0.0),
-		scenario.left_timer_offset
+		left_spec,
+		_spawn_position(LEFT_SPAWN_RATIO),
+		_seeded_spawn_velocity(float(left_spec["speed"])),
+		ABILITY_TIMER_OFFSET
 	)
 	right = FighterState.new(
-		right_module.fighter_spec(right_profile),
-		_scaled_spawn_position(scenario.right_spawn_position),
-		scenario.right_spawn_velocity.rotated(rng.randf_range(-0.16, 0.16) if scenario.randomize_spawn_angle else 0.0),
-		scenario.right_timer_offset
+		right_spec,
+		_spawn_position(RIGHT_SPAWN_RATIO),
+		_seeded_spawn_velocity(float(right_spec["speed"])),
+		ABILITY_TIMER_OFFSET
 	)
 	_clamp_fighter_to_arena(left)
 	_clamp_fighter_to_arena(right)
@@ -181,15 +182,16 @@ func reset(
 		"projectiles_spawned": 0,
 		"abilities": ability_counts,
 	}
-	stats.merge(scenario.initial_stats(), true)
 	left_ability.on_battle_started(battle_context, left, right, 0)
 	right_ability.on_battle_started(battle_context, right, left, 1)
 
-func _scaled_spawn_position(reference_position: Vector2) -> Vector2:
-	return Vector2(
-		reference_position.x * _arena_size.x / DEFAULT_ARENA_SIZE.x,
-		reference_position.y * _arena_size.y / DEFAULT_ARENA_SIZE.y
-	)
+func _spawn_position(ratio: Vector2) -> Vector2:
+	return Vector2(_arena_size.x * ratio.x, _arena_size.y * ratio.y)
+
+func _seeded_spawn_velocity(speed: float) -> Vector2:
+	if speed <= 0.001:
+		return Vector2.ZERO
+	return Vector2.from_angle(_spawn_rng.randf_range(0.0, TAU)) * speed
 
 func _clamp_fighter_to_arena(fighter: FighterState) -> void:
 	fighter.pos.x = clampf(fighter.pos.x, fighter.radius, _arena_size.x - fighter.radius)
@@ -282,6 +284,8 @@ func _resolve_collision() -> void:
 		return
 	_contact_timer = contact_cooldown
 	stats["contact_hits"] = int(stats["contact_hits"]) + 1
+	var impact_strength := clampf(maxf(0.0, -relative_speed) / 360.0, 0.5, 1.0)
+	emit_combat_event("body_impact", impact_strength)
 	var left_contact_damage := maxf(0.0, left_ability.contact_damage(battle_context, left, right))
 	var right_contact_damage := maxf(0.0, right_ability.contact_damage(battle_context, right, left))
 	var left_damage_dealt := damage(right, left_contact_damage, left.accent, left) if left_contact_damage > 0.0 else 0.0
@@ -578,7 +582,6 @@ func snapshot() -> Dictionary:
 		"finished": finished,
 		"winner_id": winner_id,
 		"winner_side": winner_side,
-		"scenario_id": scenario.id,
 		"left_hp": left.hp,
 		"right_hp": right.hp,
 		"left_pos": left.pos,

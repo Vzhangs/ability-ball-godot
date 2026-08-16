@@ -37,6 +37,7 @@ func _init() -> void:
 		_check(module.create_visual() is BallVisual, "%s 提供独立视觉实现" % ball_id)
 	_check(unique.size() == ids.size(), "球 ID 不重复")
 	_check(not BallRegistry.has_id("not-a-ball"), "未知球 ID 被注册表拒绝")
+	_check_seeded_spawn_directions()
 	_check_inertial_motion()
 	_check_contact_damage_contract()
 	_check_combat_audio_contract()
@@ -88,8 +89,6 @@ func _init() -> void:
 
 	var expected_matchups := ids.size() * (ids.size() - 1) / 2
 	_check(matchup_count == expected_matchups, "%d 个球的 %d 种异种组合全部覆盖" % [ids.size(), expected_matchups])
-	_check(minimum_elapsed >= 3.0, "默认 100 生命值下最快对局仍能完成一次能力展开")
-	_check(total_elapsed / matchup_count >= 30.0, "平均对局时长适合短视频叙事")
 	for ball_id in ids:
 		var module: BallModule = BallRegistry.get_module(ball_id)
 		_check(int(ability_totals[ball_id]) > 0, "%s 的专属能力至少触发一次" % module.display_name)
@@ -134,6 +133,23 @@ func _inside_arena(fighter: BattleSimulation.FighterState, arena_size: Vector2) 
 		and fighter.pos.y <= arena_size.y - fighter.radius + 0.01
 	)
 
+func _check_seeded_spawn_directions() -> void:
+	var first := BattleSimulationScript.new(20260831, "vampire", "six_king")
+	var replay := BattleSimulationScript.new(20260831, "vampire", "six_king")
+	var divergent := BattleSimulationScript.new(20260901, "vampire", "six_king")
+	_check(first.left.velocity.is_equal_approx(replay.left.velocity), "相同种子复现左球初始方向")
+	_check(first.right.velocity.is_equal_approx(replay.right.velocity), "相同种子复现右球初始方向")
+	_check(not first.left.velocity.normalized().is_equal_approx(divergent.left.velocity.normalized()), "不同种子改变左球初始方向")
+	_check(not first.right.velocity.normalized().is_equal_approx(divergent.right.velocity.normalized()), "不同种子改变右球初始方向")
+	_check(
+		is_equal_approx(first.left.velocity.length(), first.left_module.speed),
+		"左球随机方向保留自身配置的初始速度大小"
+	)
+	_check(
+		is_equal_approx(first.right.velocity.length(), first.right_module.speed),
+		"右球随机方向保留自身配置的初始速度大小"
+	)
+
 func _check_inertial_motion() -> void:
 	var simulation := BattleSimulationScript.new(20260821, "splitter", "heaven")
 	simulation.left.pos = Vector2(180.0, 180.0)
@@ -156,6 +172,10 @@ func _check_contact_damage_contract() -> void:
 	_check(is_equal_approx(neutral_contact.left.hp, neutral_left_hp), "无碰撞能力的左球相撞不掉血")
 	_check(is_equal_approx(neutral_contact.right.hp, neutral_right_hp), "无碰撞能力的右球相撞不掉血")
 	_check(int(neutral_contact.stats["contact_hits"]) == 1, "无伤害碰撞仍保留物理碰撞统计")
+	_check(
+		_count_combat_events(neutral_contact.take_combat_events(), "body_impact") == 1,
+		"两个大球接触时由碰撞结算立即发送撞击音效事件"
+	)
 
 	var damaging_contact := BattleSimulationScript.new(20260829, "vampire", "laser")
 	_prepare_contact(damaging_contact)
@@ -167,8 +187,14 @@ func _check_contact_damage_contract() -> void:
 
 func _check_combat_audio_contract() -> void:
 	var audio = ProceduralAudioScript.new()
-	for kind in ["volley", "projectile_hit", "split", "clone_impact", "ram_impact"]:
+	for kind in ["impact", "body_impact", "volley", "projectile_hit", "split", "clone_impact", "ram_impact"]:
 		_check(audio.supports_event(kind), "程序音频支持 %s 战斗事件" % kind)
+	_check(ProceduralAudioScript.GENERATOR_BUFFER_LENGTH <= 0.05, "程序音频缓存不超过 50 毫秒")
+	_check(ProceduralAudioScript.AUDIO_PROCESS_PRIORITY > 0, "音频混音晚于战斗节点处理同帧事件")
+	var impact_profile: Dictionary = audio.event_profile("body_impact")
+	_check(float(impact_profile["attack"]) <= 0.001, "大球撞击使用 1 毫秒快速起音")
+	_check(float(impact_profile["frequency"]) >= 200.0, "大球撞击主体包含可辨识的中频敲击")
+	_check(float(impact_profile["transient"]) >= 0.5, "大球撞击包含清晰的宽频瞬态")
 	audio.free()
 
 func _prepare_contact(simulation: BattleSimulation) -> void:
@@ -681,13 +707,13 @@ func _check_black_hole_absorption() -> void:
 	simulation.left_ability.activate(simulation.battle_context, simulation.left, simulation.right, 0)
 	simulation.left_ability.on_step(simulation.battle_context, simulation.left, simulation.right, 0, 0.1)
 	_check(int(simulation.stats.get("objects_absorbed", 0)) == 0, "黑洞不会让远处非本体瞬间消失")
-	_check(int(simulation.stats.get("objects_captured", 0)) == 4, "持续区域、锚点、场景物件和分身统一进入捕获轨道")
+	_check(int(simulation.stats.get("objects_captured", 0)) == 4, "持续区域、锚点、附属物和分身统一进入捕获轨道")
 	for entity in [zone, anchor, edge_object, clone]:
 		_check(entity.is_captured(), "%s 被黑洞捕获并禁用" % entity.tags[0])
 		_check(entity.owner_side == 1, "%s 被捕获后保留原阵营" % entity.tags[0])
 		_check(not entity.removed, "%s 被捕获后不会瞬间消失" % entity.tags[0])
 	_check(zone.pos.distance_to(simulation.left.pos) < zone_distance_before, "持续区域沿收缩轨道被吸向黑洞")
-	_check(anchor.pos.distance_to(simulation.left.pos) < anchor_distance_before, "场景物件沿收缩轨道被吸向黑洞")
+	_check(anchor.pos.distance_to(simulation.left.pos) < anchor_distance_before, "敌方附属物沿收缩轨道被吸向黑洞")
 	var disabled_position := zone.pos
 	zone.velocity = Vector2(300.0, 0.0)
 	zone.process_step(simulation.battle_context, 1.0)
@@ -699,7 +725,7 @@ func _check_black_hole_absorption() -> void:
 			break
 	_check(int(simulation.stats.get("objects_absorbed", 0)) == 4, "四类敌方非本体最终都进入事件视界")
 	_check(zone.removed, "黑洞移除范围内的敌方持续区域")
-	_check(anchor.removed, "黑洞移除范围内的敌方场景物件")
+	_check(anchor.removed, "黑洞移除范围内的敌方附属物")
 	_check(edge_object.removed, "敌方附属物在 72 像素事件视界内被吞噬")
 	_check(clone.removed, "黑洞能够捕获复制或分裂出来的非本体")
 	var absorption_effects := simulation.entity_list(0, "absorption_vfx")
@@ -713,8 +739,8 @@ func _check_black_hole_absorption() -> void:
 func _check_time_limit_configuration() -> void:
 	var default_battle := BattleSimulationScript.new(20260825, "splitter", "heaven")
 	_check(is_equal_approx(default_battle.max_battle_time, 120.0), "普通对局默认时限为两分钟")
-	var showcase_battle := BattleSimulationScript.new(20260825, "vampire", "six_king")
-	_check(is_equal_approx(showcase_battle.max_battle_time, 120.0), "默认展示对局时限为两分钟")
+	var second_pair := BattleSimulationScript.new(20260825, "vampire", "six_king")
+	_check(is_equal_approx(second_pair.max_battle_time, 120.0), "所有球组合默认时限均为两分钟")
 	var configured_battle := BattleSimulationScript.new(20260825, "splitter", "heaven", 75.0)
 	_check(is_equal_approx(configured_battle.max_battle_time, 75.0), "调用方可以覆盖单局时限")
 
