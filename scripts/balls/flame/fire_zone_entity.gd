@@ -1,13 +1,17 @@
 extends BallEntity
 
 var _duration := 0.0
+var _absorption_radius_cap := 1.0
+var _absorption_radius_ratio := 1.0
 
-func _init(spawn_owner_side: int, spawn_position: Vector2, duration: float, zone_radius: float) -> void:
+func _init(spawn_owner_side: int, spawn_position: Vector2, config: Dictionary) -> void:
 	owner_side = spawn_owner_side
 	pos = spawn_position
-	remaining = duration
-	_duration = duration
-	radius = zone_radius
+	remaining = float(config["duration"])
+	_duration = remaining
+	radius = float(config["radius"])
+	_absorption_radius_cap = float(config["absorption_radius_cap"])
+	_absorption_radius_ratio = float(config["absorption_radius_ratio"])
 	tags = PackedStringArray(["flame_zone"])
 	draw_layer = -40
 
@@ -23,7 +27,7 @@ func is_absorbable() -> bool:
 	return true
 
 func absorption_radius() -> float:
-	return minf(12.0, radius * 0.35)
+	return minf(_absorption_radius_cap, radius * _absorption_radius_ratio)
 
 func absorption_visual_color() -> Color:
 	return Color("ff7a24")

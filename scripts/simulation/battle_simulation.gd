@@ -3,12 +3,13 @@ extends RefCounted
 
 const BallBattleContextScript := preload("res://scripts/balls/core/ball_battle_context.gd")
 const ScenarioRegistryScript := preload("res://scripts/scenarios/core/scenario_registry.gd")
+const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
 
-const ARENA_SIZE := Vector2(640.0, 640.0)
-const DEFAULT_BATTLE_TIME := 120.0
+const DEFAULT_ARENA_SIZE := GlobalGameSettingsScript.DEFAULT_ARENA_SIZE
+const DEFAULT_BATTLE_TIME := GlobalGameSettingsScript.DEFAULT_BATTLE_TIME
 const FIXED_STEP := 1.0 / 60.0
-const DAMAGE_SCALE := 0.5
-const RECOVERY_SCALE := 0.5
+const DAMAGE_SCALE := 1.0
+const RECOVERY_SCALE := 1.0
 
 class FighterState:
 	var id := ""
@@ -76,6 +77,7 @@ var scenario
 var left_profile := "default"
 var right_profile := "default"
 var max_battle_time := DEFAULT_BATTLE_TIME
+var _arena_size := DEFAULT_ARENA_SIZE
 var damage_scale := DAMAGE_SCALE
 var recovery_scale := RECOVERY_SCALE
 var contact_cooldown := 0.38
@@ -95,14 +97,30 @@ var _trail_timer := 0.0
 
 var stats := {}
 
-func _init(initial_seed: int, initial_left: String, initial_right: String, time_limit_seconds: float = -1.0) -> void:
-	reset(initial_seed, initial_left, initial_right, time_limit_seconds)
+func _init(
+	initial_seed: int,
+	initial_left: String,
+	initial_right: String,
+	time_limit_seconds: float = -1.0,
+	battle_arena_size: Vector2 = DEFAULT_ARENA_SIZE
+) -> void:
+	reset(initial_seed, initial_left, initial_right, time_limit_seconds, battle_arena_size)
 
-func reset(new_seed: int, new_left: String, new_right: String, time_limit_seconds: float = -1.0) -> void:
+func reset(
+	new_seed: int,
+	new_left: String,
+	new_right: String,
+	time_limit_seconds: float = -1.0,
+	battle_arena_size: Vector2 = DEFAULT_ARENA_SIZE
+) -> void:
 	assert(BallRegistry.is_valid(), "Ball registry is invalid: %s" % ", ".join(BallRegistry.validation_errors()))
 	assert(ScenarioRegistryScript.validation_errors().is_empty(), "Battle scenario registry is invalid: %s" % ", ".join(ScenarioRegistryScript.validation_errors()))
 	assert(BallRegistry.has_id(new_left), "Unknown left ball id: %s" % new_left)
 	assert(BallRegistry.has_id(new_right), "Unknown right ball id: %s" % new_right)
+	_arena_size = Vector2(
+		maxf(160.0, battle_arena_size.x),
+		maxf(160.0, battle_arena_size.y)
+	)
 	seed_value = new_seed if new_seed != 0 else 20260815
 	left_id = new_left
 	right_id = new_right
@@ -116,9 +134,9 @@ func reset(new_seed: int, new_left: String, new_right: String, time_limit_second
 	left_ability = left_module.create_profile_ability(left_profile)
 	right_ability = right_module.create_profile_ability(right_profile)
 	battle_context = BallBattleContextScript.new(self)
-	max_battle_time = maxf(FIXED_STEP, time_limit_seconds if time_limit_seconds > 0.0 else scenario.max_battle_time)
-	damage_scale = scenario.damage_scale
-	recovery_scale = scenario.recovery_scale
+	max_battle_time = maxf(FIXED_STEP, time_limit_seconds if time_limit_seconds > 0.0 else DEFAULT_BATTLE_TIME)
+	damage_scale = DAMAGE_SCALE
+	recovery_scale = RECOVERY_SCALE
 	contact_cooldown = scenario.contact_cooldown
 	collision_impulse = scenario.collision_impulse
 	trail_interval = scenario.trail_interval
@@ -131,16 +149,18 @@ func reset(new_seed: int, new_left: String, new_right: String, time_limit_second
 	finish_reason = ""
 	left = FighterState.new(
 		left_module.fighter_spec(left_profile),
-		scenario.left_spawn_position,
+		_scaled_spawn_position(scenario.left_spawn_position),
 		scenario.left_spawn_velocity.rotated(rng.randf_range(-0.16, 0.16) if scenario.randomize_spawn_angle else 0.0),
 		scenario.left_timer_offset
 	)
 	right = FighterState.new(
 		right_module.fighter_spec(right_profile),
-		scenario.right_spawn_position,
+		_scaled_spawn_position(scenario.right_spawn_position),
 		scenario.right_spawn_velocity.rotated(rng.randf_range(-0.16, 0.16) if scenario.randomize_spawn_angle else 0.0),
 		scenario.right_timer_offset
 	)
+	_clamp_fighter_to_arena(left)
+	_clamp_fighter_to_arena(right)
 	impact_rings.clear()
 	particles.clear()
 	floating_texts.clear()
@@ -164,6 +184,16 @@ func reset(new_seed: int, new_left: String, new_right: String, time_limit_second
 	stats.merge(scenario.initial_stats(), true)
 	left_ability.on_battle_started(battle_context, left, right, 0)
 	right_ability.on_battle_started(battle_context, right, left, 1)
+
+func _scaled_spawn_position(reference_position: Vector2) -> Vector2:
+	return Vector2(
+		reference_position.x * _arena_size.x / DEFAULT_ARENA_SIZE.x,
+		reference_position.y * _arena_size.y / DEFAULT_ARENA_SIZE.y
+	)
+
+func _clamp_fighter_to_arena(fighter: FighterState) -> void:
+	fighter.pos.x = clampf(fighter.pos.x, fighter.radius, _arena_size.x - fighter.radius)
+	fighter.pos.y = clampf(fighter.pos.y, fighter.radius, _arena_size.y - fighter.radius)
 
 func step(delta: float = FIXED_STEP) -> void:
 	delta = clampf(delta, 0.0, 0.05)
@@ -215,16 +245,16 @@ func _resolve_wall(fighter: FighterState) -> void:
 		fighter.pos.x = fighter.radius
 		fighter.velocity.x = absf(fighter.velocity.x)
 		bounced = true
-	elif fighter.pos.x > ARENA_SIZE.x - fighter.radius:
-		fighter.pos.x = ARENA_SIZE.x - fighter.radius
+	elif fighter.pos.x > _arena_size.x - fighter.radius:
+		fighter.pos.x = _arena_size.x - fighter.radius
 		fighter.velocity.x = -absf(fighter.velocity.x)
 		bounced = true
 	if fighter.pos.y < fighter.radius:
 		fighter.pos.y = fighter.radius
 		fighter.velocity.y = absf(fighter.velocity.y)
 		bounced = true
-	elif fighter.pos.y > ARENA_SIZE.y - fighter.radius:
-		fighter.pos.y = ARENA_SIZE.y - fighter.radius
+	elif fighter.pos.y > _arena_size.y - fighter.radius:
+		fighter.pos.y = _arena_size.y - fighter.radius
 		fighter.velocity.y = -absf(fighter.velocity.y)
 		bounced = true
 	if bounced:
@@ -473,7 +503,7 @@ func has_status(target: FighterState, key_prefix: String) -> bool:
 	return false
 
 func arena_size() -> Vector2:
-	return ARENA_SIZE
+	return _arena_size
 
 func fighter_for_side(side: int) -> FighterState:
 	return left if side == 0 else right
@@ -503,18 +533,18 @@ func _record_ability(ball_id: String) -> void:
 func ray_to_arena_edge(origin: Vector2, direction: Vector2) -> Vector2:
 	var distances: Array[float] = []
 	if direction.x > 0.001:
-		distances.append((ARENA_SIZE.x - origin.x) / direction.x)
+		distances.append((_arena_size.x - origin.x) / direction.x)
 	elif direction.x < -0.001:
 		distances.append((0.0 - origin.x) / direction.x)
 	if direction.y > 0.001:
-		distances.append((ARENA_SIZE.y - origin.y) / direction.y)
+		distances.append((_arena_size.y - origin.y) / direction.y)
 	elif direction.y < -0.001:
 		distances.append((0.0 - origin.y) / direction.y)
-	var minimum := 1000.0
+	var minimum := INF
 	for value in distances:
 		if value > 0.0:
 			minimum = minf(minimum, value)
-	return origin + direction * minimum
+	return origin if is_inf(minimum) else origin + direction * minimum
 
 func _check_finish() -> void:
 	if left.hp <= 0.0 or right.hp <= 0.0:
@@ -544,6 +574,7 @@ func winner() -> FighterState:
 func snapshot() -> Dictionary:
 	return {
 		"elapsed": elapsed,
+		"arena_size": _arena_size,
 		"finished": finished,
 		"winner_id": winner_id,
 		"winner_side": winner_side,

@@ -5,9 +5,9 @@ const ShowcaseCheckerEntity := preload("res://scripts/balls/six_king/showcase_ch
 const ShowcaseTrackEntity := preload("res://scripts/balls/six_king/showcase_track_entity.gd")
 const ShowcaseCarriageEntity := preload("res://scripts/balls/six_king/showcase_carriage_entity.gd")
 
-var _anchor_timer := 0.6
-var _track_timer := 2.5
-var _checker_timer := 3.0
+var _anchor_timer := 0.0
+var _track_timer := 0.0
+var _checker_timer := 0.0
 var _tether_damage_timer := 0.0
 var _track_damage_timer := 0.0
 var _carriage_damage_timer := 0.0
@@ -20,7 +20,16 @@ func crown_level() -> int:
 	return _crown_level
 
 func on_battle_started(battle, fighter, _opponent, side: int) -> void:
-	battle.add_entity(ShowcaseCarriageEntity.new(side, fighter, self))
+	_anchor_timer = settingf("showcase_anchor_initial_delay")
+	_track_timer = settingf("showcase_track_initial_delay")
+	_checker_timer = settingf("showcase_checker_initial_delay")
+	battle.add_entity(ShowcaseCarriageEntity.new(side, fighter, self, {
+		"radius": settingf("showcase_carriage_hit_radius"),
+		"orbit_radius": settingf("showcase_carriage_orbit_radius"),
+		"orbit_radius_per_level": settingf("showcase_carriage_orbit_per_level"),
+		"orbit_speed": settingf("showcase_carriage_orbit_speed"),
+		"orbit_speed_per_level": settingf("showcase_carriage_speed_per_level"),
+	}))
 
 func before_motion(_battle, _fighter, _opponent, _side: int, delta: float) -> void:
 	_anchor_timer -= delta
@@ -33,29 +42,38 @@ func before_motion(_battle, _fighter, _opponent, _side: int, delta: float) -> vo
 func on_step(battle, fighter, opponent, side: int, _delta: float) -> void:
 	_update_crown_level(battle, fighter, opponent)
 	var anchors: Array[BallEntity] = battle.entities(side, "showcase_anchor")
-	var desired_anchor_count: int = 8 + _crown_level * 7
+	var desired_anchor_count: int = settingi("showcase_anchor_base_count") + _crown_level * settingi("showcase_anchor_per_level")
 	if _anchor_timer <= 0.0 and anchors.size() < desired_anchor_count:
-		_anchor_timer = maxf(0.7, 1.55 - _crown_level * 0.22)
+		_anchor_timer = maxf(
+			settingf("showcase_anchor_interval_min"),
+			settingf("showcase_anchor_interval") - _crown_level * settingf("showcase_anchor_interval_level_reduction")
+		)
 		_spawn_anchor(battle, fighter, side, anchors.size())
 
 	if _checker_timer <= 0.0:
-		_checker_timer = maxf(3.5, 5.8 - _crown_level * 0.55)
+		_checker_timer = maxf(
+			settingf("showcase_checker_interval_min"),
+			settingf("showcase_checker_interval") - _crown_level * settingf("showcase_checker_interval_level_reduction")
+		)
 		_activate_checkerboard(battle, fighter, opponent, side)
 
 	if _track_timer <= 0.0:
-		_track_timer = maxf(4.6, 8.2 - _crown_level)
+		_track_timer = maxf(
+			settingf("showcase_track_interval_min"),
+			settingf("showcase_track_interval") - _crown_level * settingf("showcase_track_interval_level_reduction")
+		)
 		_spawn_track(battle, fighter, side)
 
 	anchors = battle.entities(side, "showcase_anchor")
 	if anchors.is_empty() or _tether_damage_timer > 0.0:
 		return
-	_tether_damage_timer = 0.20
+	_tether_damage_timer = settingf("showcase_tether_tick")
 	var crossings := 0
 	for anchor in anchors:
-		if _distance_to_segment(opponent.pos, fighter.pos, anchor.pos) <= opponent.radius * 0.72:
+		if _distance_to_segment(opponent.pos, fighter.pos, anchor.pos) <= opponent.radius * settingf("showcase_tether_hit_radius_factor"):
 			crossings += 1
 	if crossings > 0:
-		var tether_damage := minf(26.0, 2.4 + crossings * (1.6 + _crown_level * 0.55))
+		var tether_damage := _tether_damage(crossings)
 		battle.damage(opponent, tether_damage, Color("7be8ff"), fighter, false)
 		battle.record_stat("tether_hits")
 		battle.spawn_particles(opponent.pos, Color("8defff"), mini(8, crossings + 2), 95.0)
@@ -66,7 +84,7 @@ func on_step(battle, fighter, opponent, side: int, _delta: float) -> void:
 				entity_crossings += 1
 		if entity_crossings <= 0:
 			continue
-		var entity_damage := minf(26.0, 2.4 + entity_crossings * (1.6 + _crown_level * 0.55))
+		var entity_damage := _tether_damage(entity_crossings)
 		battle.damage_entity(entity, entity_damage, Color("7be8ff"), side, false)
 		battle.record_stat("tether_hits")
 		battle.spawn_particles(entity.pos, Color("8defff"), mini(8, entity_crossings + 2), 95.0)
@@ -85,14 +103,15 @@ func after_entities_step(battle, fighter, opponent, side: int, _delta: float) ->
 				track_targets.append(entity)
 				break
 	if _track_damage_timer <= 0.0 and (touching_track or not track_targets.is_empty()):
-		_track_damage_timer = 0.16
-		var track_damage := 7.0 + _crown_level * 3.5
+		_track_damage_timer = settingf("showcase_track_tick")
+		var track_damage := settingf("showcase_track_base_damage") + _crown_level * settingf("showcase_track_level_damage")
+		var track_knockback := settingf("showcase_track_knockback")
 		if touching_track:
 			battle.damage(opponent, track_damage, Color("e5bd83"), fighter, false)
-			opponent.velocity += (opponent.pos - fighter.pos).normalized() * 28.0
+			opponent.velocity += (opponent.pos - fighter.pos).normalized() * track_knockback
 		for entity: BallEntity in track_targets:
 			battle.damage_entity(entity, track_damage, Color("e5bd83"), side, false)
-			entity.velocity += (entity.pos - fighter.pos).normalized() * 28.0
+			entity.velocity += (entity.pos - fighter.pos).normalized() * track_knockback
 		battle.record_stat("track_hits")
 		battle.emit_combat_event("track", 0.45)
 
@@ -100,38 +119,46 @@ func after_entities_step(battle, fighter, opponent, side: int, _delta: float) ->
 	if carriages.is_empty() or _carriage_damage_timer > 0.0:
 		return
 	var carriage := carriages[0]
-	var carriage_hits_opponent: bool = carriage.pos.distance_to(opponent.pos) <= opponent.radius + 31.0
-	var carriage_targets: Array[BallEntity] = battle.damageable_entities_in_circle(side, carriage.pos, 31.0)
+	var carriage_hit_radius := settingf("showcase_carriage_hit_radius")
+	var carriage_hits_opponent: bool = carriage.pos.distance_to(opponent.pos) <= opponent.radius + carriage_hit_radius
+	var carriage_targets: Array[BallEntity] = battle.damageable_entities_in_circle(side, carriage.pos, carriage_hit_radius)
 	if not carriage_hits_opponent and carriage_targets.is_empty():
 		return
-	_carriage_damage_timer = 0.65
-	var carriage_damage := 25.0 + _crown_level * 8.0
+	_carriage_damage_timer = settingf("showcase_carriage_hit_interval")
+	var carriage_damage := settingf("showcase_carriage_damage") + _crown_level * settingf("showcase_carriage_level_damage")
+	var carriage_knockback := settingf("showcase_carriage_knockback")
 	if carriage_hits_opponent:
 		battle.damage(opponent, carriage_damage, Color("f4f4f4"), fighter)
-		opponent.velocity += (opponent.pos - carriage.pos).normalized() * 110.0
+		opponent.velocity += (opponent.pos - carriage.pos).normalized() * carriage_knockback
 	for entity: BallEntity in carriage_targets:
 		battle.damage_entity(entity, carriage_damage, Color("f4f4f4"), side)
-		entity.velocity += (entity.pos - carriage.pos).normalized() * 110.0
+		entity.velocity += (entity.pos - carriage.pos).normalized() * carriage_knockback
 	battle.shake_camera(7.0)
 
 func _spawn_anchor(battle, fighter, side: int, index: int) -> void:
 	var edge_side := index % 4
 	var slot := int(index / 4)
-	var spread := 72.0 + float(slot % 7) * 82.0
+	var slots_per_edge := settingi("showcase_anchor_slots_per_edge")
+	var spread := settingf("showcase_anchor_first_offset") + float(slot % slots_per_edge) * settingf("showcase_anchor_slot_spacing")
+	var arena_size: Vector2 = battle.arena_size()
+	var edge_margin := settingf("showcase_anchor_edge_margin")
+	var corner_guard := settingf("showcase_anchor_corner_guard")
+	var horizontal_spread := clampf(spread, corner_guard, arena_size.x - corner_guard)
+	var vertical_spread := clampf(spread, corner_guard, arena_size.y - corner_guard)
 	var position := Vector2.ZERO
 	var inward := Vector2.ZERO
 	match edge_side:
 		0:
-			position = Vector2(clampf(spread, 22.0, 618.0), 7.0)
+			position = Vector2(horizontal_spread, edge_margin)
 			inward = Vector2.DOWN
 		1:
-			position = Vector2(633.0, clampf(spread, 22.0, 618.0))
+			position = Vector2(arena_size.x - edge_margin, vertical_spread)
 			inward = Vector2.LEFT
 		2:
-			position = Vector2(clampf(battle.arena_size().x - spread, 22.0, 618.0), 633.0)
+			position = Vector2(arena_size.x - horizontal_spread, arena_size.y - edge_margin)
 			inward = Vector2.UP
 		_:
-			position = Vector2(7.0, clampf(battle.arena_size().y - spread, 22.0, 618.0))
+			position = Vector2(edge_margin, arena_size.y - vertical_spread)
 			inward = Vector2.RIGHT
 	battle.add_entity(ShowcaseAnchorEntity.new(side, fighter, position, inward, index))
 	battle.record_stat("anchors_spawned")
@@ -139,24 +166,25 @@ func _spawn_anchor(battle, fighter, side: int, index: int) -> void:
 
 func _activate_checkerboard(battle, fighter, opponent, side: int) -> void:
 	var cells: Array[Dictionary] = []
-	var grid_count := 6
+	var grid_count := settingi("showcase_checker_grid")
+	var pattern_divisor := settingi("showcase_checker_pattern_divisor")
 	var cell_size: float = battle.arena_size().x / float(grid_count)
 	for y in range(grid_count):
 		for x in range(grid_count):
-			var active: bool = ((x + y + _crown_level + int(battle.elapsed)) % 3 == 0) or battle.random_float() < 0.14
-			var value: int = battle.random_int(1, 30)
+			var active: bool = ((x + y + _crown_level + int(battle.elapsed)) % pattern_divisor == 0) or battle.random_float() < settingf("showcase_checker_active_chance")
+			var value: int = battle.random_int(1, settingi("showcase_checker_value_max"))
 			cells.append({
 				"rect": Rect2(Vector2(x, y) * cell_size, Vector2.ONE * cell_size),
 				"active": active,
 				"value": value,
 			})
-	battle.add_entity(ShowcaseCheckerEntity.new(side, cells))
+	battle.add_entity(ShowcaseCheckerEntity.new(side, cells, settingf("showcase_checker_duration")))
 	var cell_x := clampi(int(opponent.pos.x / cell_size), 0, grid_count - 1)
 	var cell_y := clampi(int(opponent.pos.y / cell_size), 0, grid_count - 1)
 	var current: Dictionary = cells[cell_y * grid_count + cell_x]
 	var hit_something := false
 	if bool(current["active"]):
-		var damage: float = 24.0 + float(current["value"]) * 0.75 + _crown_level * 7.0
+		var damage: float = _checker_damage(int(current["value"]))
 		battle.damage(opponent, damage, Color("fff06a"), fighter)
 		hit_something = true
 	for entity: BallEntity in battle.damageable_entities(side):
@@ -165,7 +193,7 @@ func _activate_checkerboard(battle, fighter, opponent, side: int) -> void:
 		var entity_cell: Dictionary = cells[entity_cell_y * grid_count + entity_cell_x]
 		if not bool(entity_cell["active"]):
 			continue
-		var entity_damage: float = 24.0 + float(entity_cell["value"]) * 0.75 + _crown_level * 7.0
+		var entity_damage: float = _checker_damage(int(entity_cell["value"]))
 		battle.damage_entity(entity, entity_damage, Color("fff06a"), side)
 		hit_something = true
 	if hit_something:
@@ -175,11 +203,14 @@ func _activate_checkerboard(battle, fighter, opponent, side: int) -> void:
 func _spawn_track(battle, fighter, side: int) -> void:
 	var config := {
 		"angle": battle.random_range(0.0, TAU),
-		"arms": 2 + _crown_level,
-		"length": 250.0 + _crown_level * 45.0,
-		"lifetime": 10.0 + _crown_level * 2.0,
-		"angular_speed": battle.random_range(0.18, 0.34) * (-1.0 if battle.random_float() < 0.5 else 1.0),
-		"width": 19.0 + _crown_level * 2.0,
+		"arms": settingi("showcase_track_arms_base") + _crown_level,
+		"length": settingf("showcase_track_length") + _crown_level * settingf("showcase_track_length_per_level"),
+		"lifetime": settingf("showcase_track_lifetime") + _crown_level * settingf("showcase_track_lifetime_per_level"),
+		"angular_speed": battle.random_range(
+			settingf("showcase_track_angular_speed_min"),
+			settingf("showcase_track_angular_speed_max")
+		) * (-1.0 if battle.random_float() < settingf("showcase_track_clockwise_chance") else 1.0),
+		"width": settingf("showcase_track_width") + _crown_level * settingf("showcase_track_width_per_level"),
 	}
 	battle.add_entity(ShowcaseTrackEntity.new(side, fighter, config))
 	battle.record_stat("tracks_spawned")
@@ -187,9 +218,9 @@ func _spawn_track(battle, fighter, side: int) -> void:
 
 func _update_crown_level(battle, fighter, opponent) -> void:
 	var next_level := 1
-	if battle.elapsed >= 74.0 or opponent.hp_ratio() <= 0.36:
+	if battle.elapsed >= settingf("showcase_level_3_time") or opponent.hp_ratio() <= settingf("showcase_level_3_hp_ratio"):
 		next_level = 3
-	elif battle.elapsed >= 37.0 or opponent.hp_ratio() <= 0.68:
+	elif battle.elapsed >= settingf("showcase_level_2_time") or opponent.hp_ratio() <= settingf("showcase_level_2_hp_ratio"):
 		next_level = 2
 	if next_level <= _crown_level:
 		return
@@ -208,3 +239,17 @@ func _distance_to_segment(point: Vector2, start: Vector2, finish: Vector2) -> fl
 		return point.distance_to(start)
 	var t := clampf((point - start).dot(segment) / length_squared, 0.0, 1.0)
 	return point.distance_to(start + segment * t)
+
+func _tether_damage(crossings: int) -> float:
+	return minf(
+		settingf("showcase_tether_damage_cap"),
+		settingf("showcase_tether_base_damage")
+		+ crossings * (settingf("showcase_tether_crossing_damage") + _crown_level * settingf("showcase_tether_level_damage"))
+	)
+
+func _checker_damage(value: int) -> float:
+	return (
+		settingf("showcase_checker_base_damage")
+		+ float(value) * settingf("showcase_checker_value_damage")
+		+ _crown_level * settingf("showcase_checker_level_damage")
+	)

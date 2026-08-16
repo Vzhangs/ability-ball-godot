@@ -3,20 +3,28 @@ extends BallEntity
 var _owner
 var _ability
 var angle := 0.0
+var _orbit_radius := 0.0
+var _orbit_radius_per_level := 0.0
+var _orbit_speed := 0.0
+var _orbit_speed_per_level := 0.0
 
-func _init(spawn_owner_side: int, owner, owner_ability) -> void:
+func _init(spawn_owner_side: int, owner, owner_ability, config: Dictionary) -> void:
 	owner_side = spawn_owner_side
 	_owner = owner
 	_ability = owner_ability
 	pos = owner.pos
-	radius = 31.0
+	radius = float(config["radius"])
+	_orbit_radius = float(config["orbit_radius"])
+	_orbit_radius_per_level = float(config["orbit_radius_per_level"])
+	_orbit_speed = float(config["orbit_speed"])
+	_orbit_speed_per_level = float(config["orbit_speed_per_level"])
 	tags = PackedStringArray(["showcase_carriage"])
 	draw_layer = -5
 
 func step(_battle, delta: float) -> void:
 	var crown_level: int = _ability.crown_level()
-	angle += delta * (1.25 + crown_level * 0.15)
-	var orbit_radius: float = 82.0 + crown_level * 11.0
+	angle += delta * (_orbit_speed + crown_level * _orbit_speed_per_level)
+	var orbit_radius: float = _orbit_radius + crown_level * _orbit_radius_per_level
 	pos = _owner.pos + Vector2.from_angle(angle) * orbit_radius
 
 func draw(canvas: CanvasItem, context: BallRenderContext) -> void:

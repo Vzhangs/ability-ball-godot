@@ -3,17 +3,22 @@ extends Control
 const BattleViewScript := preload("res://scripts/ui/battle_view.gd")
 const BattleSimulationScript := preload("res://scripts/simulation/battle_simulation.gd")
 const ProceduralAudioScript := preload("res://scripts/audio/procedural_audio.gd")
+const BallSettingsStoreScript := preload("res://scripts/settings/ball_settings_store.gd")
+const BallSettingsDialogScript := preload("res://scripts/ui/ball_settings_dialog.gd")
+const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
+const GlobalSettingsStoreScript := preload("res://scripts/settings/global_settings_store.gd")
+const GlobalSettingsDialogScript := preload("res://scripts/ui/global_settings_dialog.gd")
 
 var battle_view
 var seed_value := 20260815
 var time_limit_seconds: float = BattleSimulationScript.DEFAULT_BATTLE_TIME
+var battle_arena_size: Vector2 = BattleSimulationScript.DEFAULT_ARENA_SIZE
 var current_left_id := "vampire"
 var current_right_id := "six_king"
 var speed_values := [1.0, 2.0, 4.0]
 var speed_index := 0
 
 var seed_edit: LineEdit
-var time_limit_spin_box: SpinBox
 var pause_button: Button
 var speed_button: Button
 var result_label: Label
@@ -22,11 +27,19 @@ var right_title_label: Label
 var left_selector: OptionButton
 var right_selector: OptionButton
 var procedural_audio: ProceduralBattleAudio
+var settings_dialog
+var global_settings_dialog
 var recording_mode := false
 var _recording_quit_scheduled := false
 var _startup_valid := true
+var _runtime_settings := {}
+var _runtime_global_settings := {}
 
 func _ready() -> void:
+	_apply_global_settings(GlobalSettingsStoreScript.load_settings())
+	_runtime_settings = BallSettingsStoreScript.load_settings()
+	BallRegistry.configure_settings(_runtime_settings)
+	_runtime_settings = BallRegistry.settings_snapshot()
 	if not BallRegistry.is_valid():
 		_fail_startup("球模块注册失败：%s" % ", ".join(BallRegistry.validation_errors()))
 		return
@@ -34,7 +47,6 @@ func _ready() -> void:
 	if not recording_mode and DisplayServer.get_name() != "headless":
 		DisplayServer.window_set_size(Vector2i(540, 960))
 	seed_value = _seed_from_arguments(seed_value)
-	time_limit_seconds = _time_limit_from_arguments(BattleSimulationScript.DEFAULT_BATTLE_TIME)
 	current_left_id = _ball_id_from_arguments("--left=", current_left_id)
 	current_right_id = _ball_id_from_arguments("--right=", current_right_id)
 	if not _startup_valid:
@@ -98,7 +110,13 @@ func _replace_battle_view() -> void:
 	battle_view.position = Vector2(35.0, 190.0)
 	battle_view.size = Vector2(650.0, 650.0)
 	add_child(battle_view)
-	battle_view.start_battle(seed_value, current_left_id, current_right_id, time_limit_seconds)
+	battle_view.start_battle(
+		seed_value,
+		current_left_id,
+		current_right_id,
+		time_limit_seconds,
+		battle_arena_size
+	)
 	battle_view.set_simulation_speed(speed_values[speed_index])
 	battle_view.battle_finished.connect(_on_battle_finished)
 	battle_view.combat_event.connect(_on_combat_event)
@@ -152,41 +170,38 @@ func _build_controls() -> void:
 	controls.add_theme_constant_override("separation", 8)
 	add_child(controls)
 
-	pause_button = _make_button("暂停", Vector2(70.0, 46.0))
+	pause_button = _make_button("暂停", Vector2(64.0, 46.0))
 	pause_button.pressed.connect(_toggle_pause)
 	controls.add_child(pause_button)
 
-	speed_button = _make_button("速度 1×", Vector2(86.0, 46.0))
+	speed_button = _make_button("速度 1×", Vector2(80.0, 46.0))
 	speed_button.pressed.connect(_cycle_speed)
 	controls.add_child(speed_button)
 
-	var restart_button := _make_button("重开", Vector2(66.0, 46.0))
+	var restart_button := _make_button("重开", Vector2(60.0, 46.0))
 	restart_button.pressed.connect(_restart_same_seed)
 	controls.add_child(restart_button)
 
-	var random_button := _make_button("随机种子", Vector2(94.0, 46.0))
+	var random_button := _make_button("随机种子", Vector2(86.0, 46.0))
 	random_button.pressed.connect(_restart_random_seed)
 	controls.add_child(random_button)
 
 	seed_edit = LineEdit.new()
 	seed_edit.text = str(seed_value)
 	seed_edit.placeholder_text = "种子"
-	seed_edit.custom_minimum_size = Vector2(112.0, 46.0)
+	seed_edit.custom_minimum_size = Vector2(105.0, 46.0)
 	seed_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	seed_edit.add_theme_font_size_override("font_size", 17)
 	seed_edit.text_submitted.connect(_on_seed_submitted)
 	controls.add_child(seed_edit)
 
-	time_limit_spin_box = SpinBox.new()
-	time_limit_spin_box.min_value = 15.0
-	time_limit_spin_box.max_value = 600.0
-	time_limit_spin_box.step = 5.0
-	time_limit_spin_box.value = time_limit_seconds
-	time_limit_spin_box.suffix = " 秒"
-	time_limit_spin_box.tooltip_text = "对局时限（下次开局生效）"
-	time_limit_spin_box.custom_minimum_size = Vector2(104.0, 46.0)
-	time_limit_spin_box.value_changed.connect(_on_time_limit_changed)
-	controls.add_child(time_limit_spin_box)
+	var global_settings_button := _make_button("全局设置", Vector2(84.0, 46.0))
+	global_settings_button.pressed.connect(_open_global_settings)
+	controls.add_child(global_settings_button)
+
+	var settings_button := _make_button("球参数", Vector2(76.0, 46.0))
+	settings_button.pressed.connect(_open_ball_settings)
+	controls.add_child(settings_button)
 
 func _make_selector(selected_id: String) -> OptionButton:
 	var selector := OptionButton.new()
@@ -204,7 +219,6 @@ func _start_selected_match() -> void:
 	current_left_id = String(left_selector.get_item_metadata(left_selector.selected))
 	current_right_id = String(right_selector.get_item_metadata(right_selector.selected))
 	seed_value = _parse_seed(seed_edit.text, seed_value)
-	time_limit_seconds = time_limit_spin_box.value
 	_recording_quit_scheduled = false
 	result_label.text = ""
 	_replace_battle_view()
@@ -216,6 +230,50 @@ func _make_button(text: String, minimum_size: Vector2) -> Button:
 	button.custom_minimum_size = minimum_size
 	button.add_theme_font_size_override("font_size", 17)
 	return button
+
+func _open_ball_settings() -> void:
+	if settings_dialog == null:
+		settings_dialog = BallSettingsDialogScript.new()
+		settings_dialog.settings_submitted.connect(_on_ball_settings_submitted)
+		add_child(settings_dialog)
+	var preferred_id := current_left_id
+	if left_selector != null and left_selector.selected >= 0:
+		preferred_id = String(left_selector.get_item_metadata(left_selector.selected))
+	settings_dialog.open_settings(_runtime_settings, preferred_id)
+
+func _on_ball_settings_submitted(settings: Dictionary) -> void:
+	BallRegistry.configure_settings(settings)
+	_runtime_settings = BallRegistry.settings_snapshot()
+	var save_error: Error = BallSettingsStoreScript.save_settings(_runtime_settings)
+	if save_error != OK:
+		result_label.text = "参数已应用，但保存失败：%s" % error_string(save_error)
+	else:
+		result_label.text = "球参数已保存并应用"
+	_replace_battle_view()
+	pause_button.text = "暂停"
+
+func _open_global_settings() -> void:
+	if global_settings_dialog == null:
+		global_settings_dialog = GlobalSettingsDialogScript.new()
+		global_settings_dialog.settings_submitted.connect(_on_global_settings_submitted)
+		add_child(global_settings_dialog)
+	global_settings_dialog.open_settings(_runtime_global_settings)
+
+func _on_global_settings_submitted(settings: Dictionary) -> void:
+	_apply_global_settings(settings)
+	var save_error: Error = GlobalSettingsStoreScript.save_settings(_runtime_global_settings)
+	if save_error != OK:
+		result_label.text = "全局设置已应用，但保存失败：%s" % error_string(save_error)
+	else:
+		result_label.text = "全局设置已保存并应用"
+	_replace_battle_view()
+	pause_button.text = "暂停"
+
+func _apply_global_settings(settings: Dictionary) -> void:
+	var configuration = GlobalGameSettingsScript.new(settings)
+	_runtime_global_settings = configuration.settings_snapshot()
+	time_limit_seconds = _time_limit_from_arguments(configuration.settingf("battle_time_seconds"))
+	battle_arena_size = configuration.arena_size()
 
 func _build_footer() -> void:
 	var instructions := Label.new()
@@ -279,17 +337,18 @@ func _on_seed_submitted(value: String) -> void:
 	seed_value = _parse_seed(value, seed_value)
 	_start_seed(seed_value)
 
-func _on_time_limit_changed(value: float) -> void:
-	time_limit_seconds = value
-
 func _start_seed(value: int) -> void:
 	seed_value = value if value != 0 else 20260815
-	if time_limit_spin_box != null:
-		time_limit_seconds = time_limit_spin_box.value
 	_recording_quit_scheduled = false
 	seed_edit.text = str(seed_value)
 	result_label.text = ""
-	battle_view.start_battle(seed_value, current_left_id, current_right_id, time_limit_seconds)
+	battle_view.start_battle(
+		seed_value,
+		current_left_id,
+		current_right_id,
+		time_limit_seconds,
+		battle_arena_size
+	)
 	battle_view.set_paused(false)
 	pause_button.text = "暂停"
 

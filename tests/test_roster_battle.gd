@@ -1,10 +1,11 @@
 extends SceneTree
 
 const BattleSimulationScript := preload("res://scripts/simulation/battle_simulation.gd")
-const ReplicatorAbility := preload("res://scripts/balls/replicator/ability.gd")
-const ReplicatorCannonEntity := preload("res://scripts/balls/replicator/clone_entity.gd")
-const SplitterAbility := preload("res://scripts/balls/splitter/ability.gd")
+const ProceduralAudioScript := preload("res://scripts/audio/procedural_audio.gd")
 const SplitterCloneEntity := preload("res://scripts/balls/splitter/clone_entity.gd")
+const BallSettingsStoreScript := preload("res://scripts/settings/ball_settings_store.gd")
+const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
+const GlobalSettingsStoreScript := preload("res://scripts/settings/global_settings_store.gd")
 
 var failures: Array[String] = []
 
@@ -19,7 +20,7 @@ class TestAbsorbableEntity extends BallEntity:
 		return true
 
 func _init() -> void:
-	BallRegistry.reload()
+	BallRegistry.configure_settings({})
 	_check(BallRegistry.is_valid(), "球模块注册表通过完整性校验")
 	var ids := BallRegistry.ids()
 	_check(ids.size() >= 10, "球库保留首批 10 个球")
@@ -29,14 +30,16 @@ func _init() -> void:
 		var module: BallModule = BallRegistry.get_module(ball_id)
 		_check(module.id == ball_id, "%s 的目录 ID 一致" % ball_id)
 		_check(not module.display_name.is_empty(), "%s 有显示名称" % ball_id)
-		_check(module.max_hp > 0.0, "%s 有有效生命值" % ball_id)
+		_check(is_equal_approx(module.max_hp, 100.0), "%s 的默认生命值统一为 100" % ball_id)
 		_check(module.cooldown > 0.0, "%s 有有效能力冷却" % ball_id)
+		_check(module.setting_specs().size() >= 4, "%s 声明可配置参数 Schema" % ball_id)
 		_check(module.create_ability() is BallAbility, "%s 提供独立能力实现" % ball_id)
 		_check(module.create_visual() is BallVisual, "%s 提供独立视觉实现" % ball_id)
 	_check(unique.size() == ids.size(), "球 ID 不重复")
 	_check(not BallRegistry.has_id("not-a-ball"), "未知球 ID 被注册表拒绝")
 	_check_inertial_motion()
 	_check_contact_damage_contract()
+	_check_combat_audio_contract()
 	_check_replicator_dual_ring_formation()
 	_check_splitter_clone_bodies()
 	_check_splitter_attack_reception()
@@ -45,7 +48,9 @@ func _init() -> void:
 	_check_black_hole_projectile_capture()
 	_check_black_hole_absorption()
 	_check_time_limit_configuration()
+	_check_global_settings_configuration()
 	_check_visual_rng_isolation()
+	_check_settings_configuration()
 
 	var deterministic_a := BattleSimulationScript.new(20260815, "splitter", "black_hole")
 	var deterministic_b := BattleSimulationScript.new(20260815, "splitter", "black_hole")
@@ -83,7 +88,7 @@ func _init() -> void:
 
 	var expected_matchups := ids.size() * (ids.size() - 1) / 2
 	_check(matchup_count == expected_matchups, "%d 个球的 %d 种异种组合全部覆盖" % [ids.size(), expected_matchups])
-	_check(minimum_elapsed >= 12.0, "最快对局也保留首轮能力展开时间")
+	_check(minimum_elapsed >= 3.0, "默认 100 生命值下最快对局仍能完成一次能力展开")
 	_check(total_elapsed / matchup_count >= 30.0, "平均对局时长适合短视频叙事")
 	for ball_id in ids:
 		var module: BallModule = BallRegistry.get_module(ball_id)
@@ -116,17 +121,17 @@ func _run_to_finish(simulation: BattleSimulation, check_bounds: bool) -> void:
 	for frame in range(max_frames):
 		simulation.step(BattleSimulation.FIXED_STEP)
 		if check_bounds and frame % 300 == 0:
-			_check(_inside_arena(simulation.left), "%s 始终留在竞技场" % simulation.left.display_name)
-			_check(_inside_arena(simulation.right), "%s 始终留在竞技场" % simulation.right.display_name)
+			_check(_inside_arena(simulation.left, simulation.arena_size()), "%s 始终留在竞技场" % simulation.left.display_name)
+			_check(_inside_arena(simulation.right, simulation.arena_size()), "%s 始终留在竞技场" % simulation.right.display_name)
 		if simulation.finished:
 			break
 
-func _inside_arena(fighter: BattleSimulation.FighterState) -> bool:
+func _inside_arena(fighter: BattleSimulation.FighterState, arena_size: Vector2) -> bool:
 	return (
 		fighter.pos.x >= fighter.radius - 0.01
-		and fighter.pos.x <= BattleSimulation.ARENA_SIZE.x - fighter.radius + 0.01
+		and fighter.pos.x <= arena_size.x - fighter.radius + 0.01
 		and fighter.pos.y >= fighter.radius - 0.01
-		and fighter.pos.y <= BattleSimulation.ARENA_SIZE.y - fighter.radius + 0.01
+		and fighter.pos.y <= arena_size.y - fighter.radius + 0.01
 	)
 
 func _check_inertial_motion() -> void:
@@ -160,6 +165,12 @@ func _check_contact_damage_contract() -> void:
 	_check(is_equal_approx(damaging_contact.left.hp, vampire_hp), "没有碰撞能力的一侧不会反向造成伤害")
 	_check(damaging_contact.right.hp < laser_hp, "吸血鬼通过自身碰撞能力显式造成伤害")
 
+func _check_combat_audio_contract() -> void:
+	var audio = ProceduralAudioScript.new()
+	for kind in ["volley", "projectile_hit", "split", "clone_impact", "ram_impact"]:
+		_check(audio.supports_event(kind), "程序音频支持 %s 战斗事件" % kind)
+	audio.free()
+
 func _prepare_contact(simulation: BattleSimulation) -> void:
 	var minimum_distance := simulation.left.radius + simulation.right.radius
 	simulation.left.pos = Vector2(280.0, 320.0)
@@ -168,13 +179,16 @@ func _prepare_contact(simulation: BattleSimulation) -> void:
 	simulation.right.velocity = Vector2(-160.0, 0.0)
 
 func _check_replicator_dual_ring_formation() -> void:
-	_check(ReplicatorAbility.MAX_CANNONS == 22, "浮游炮总上限固定为 22 门")
-	_check(ReplicatorCannonEntity.INNER_RING_CAPACITY == 8, "浮游炮内圈容量固定为 8 门")
-	_check(ReplicatorCannonEntity.OUTER_RING_CAPACITY == 14, "浮游炮外圈容量固定为 14 门")
+	var module: BallModule = BallRegistry.get_module("replicator")
+	var max_cannons := module.settingi("max_cannons")
+	var inner_capacity := module.settingi("inner_ring_capacity")
+	_check(max_cannons == 22, "浮游炮数量上限默认配置为 22 门")
+	_check(inner_capacity == 8, "浮游炮内圈容量默认配置为 8 门")
+	_check(max_cannons - inner_capacity == 14, "浮游炮外圈默认容纳其余 14 门")
 	var simulation := BattleSimulationScript.new(20260906, "replicator", "laser")
 	simulation.left.pos = Vector2(320.0, 320.0)
 	simulation.right.pos = Vector2(580.0, 320.0)
-	for _activation in range(ReplicatorAbility.MAX_CANNONS):
+	for _activation in range(max_cannons):
 		simulation.left_ability.activate(
 			simulation.battle_context,
 			simulation.left,
@@ -197,13 +211,13 @@ func _check_replicator_dual_ring_formation() -> void:
 	_check_circular_ring(
 		inner_ring,
 		simulation.left.pos,
-		ReplicatorCannonEntity.INNER_ORBIT_RADIUS,
+		module.settingf("inner_orbit_radius"),
 		"内圈"
 	)
 	_check_circular_ring(
 		outer_ring,
 		simulation.left.pos,
-		ReplicatorCannonEntity.OUTER_ORBIT_RADIUS,
+		module.settingf("outer_orbit_radius"),
 		"外圈"
 	)
 	var first_offset: Vector2 = cannons[0].pos - simulation.left.pos
@@ -217,6 +231,7 @@ func _check_replicator_dual_ring_formation() -> void:
 	)
 	_check(cannons[0].pos - simulation.left.pos == first_offset, "双环编队会整体跟随浮游炮本体移动")
 	var projectile_count_before := simulation.count_entities(0, "projectile")
+	simulation.take_combat_events()
 	simulation.left_ability.activate(
 		simulation.battle_context,
 		simulation.left,
@@ -227,6 +242,8 @@ func _check_replicator_dual_ring_formation() -> void:
 	var projectiles: Array[BallEntity] = simulation.entity_list(0, "projectile")
 	var new_projectile_count := projectiles.size() - projectile_count_before
 	_check(new_projectile_count == 23, "满编时由本体与 22 门浮游炮共同齐射 23 发")
+	var volley_events := simulation.take_combat_events()
+	_check(_count_combat_events(volley_events, "volley") == 1, "23 发齐射只触发一次浮游炮发射音效")
 	if new_projectile_count == 23:
 		var first_new_projectile := projectiles[projectile_count_before]
 		_check(first_new_projectile.pos == simulation.left.pos, "满编齐射保留本体发射点")
@@ -258,7 +275,8 @@ func _check_circular_ring(
 		_check(is_equal_approx(next_angle - angles[index], expected_gap), "%s浮游炮按等角间距环绕" % label)
 
 func _check_splitter_clone_bodies() -> void:
-	_check(SplitterAbility.MAX_CLONES == 100, "分裂球允许同时存在 100 个独立分身")
+	var module: BallModule = BallRegistry.get_module("splitter")
+	_check(module.settingi("max_clones") == 100, "分裂球数量上限默认配置为 100")
 	var cap_simulation := BattleSimulationScript.new(20260831, "splitter", "laser")
 	for _activation in range(40):
 		cap_simulation.left_ability.activate(
@@ -280,6 +298,8 @@ func _check_splitter_clone_bodies() -> void:
 	simulation.left.pos = Vector2(180.0, 180.0)
 	simulation.right.pos = Vector2(500.0, 500.0)
 	simulation.left_ability.activate(simulation.battle_context, simulation.left, simulation.right, 0)
+	var split_events := simulation.take_combat_events()
+	_check(_count_combat_events(split_events, "split") == 1, "一次分裂只触发一次分裂音效")
 	var clones: Array[BallEntity] = simulation.entity_list(0, "splitter_clone")
 	_check(clones.size() == 2, "分裂球首次激活生成两个独立小球")
 	_check(is_equal_approx(
@@ -290,8 +310,8 @@ func _check_splitter_clone_bodies() -> void:
 		return
 	var clone := clones[0]
 	clones[1].pos = Vector2(580.0, 100.0)
-	_check(is_equal_approx(clone.radius, SplitterCloneEntity.BODY_RADIUS), "分身拥有独立的小型碰撞半径")
-	_check(is_equal_approx(float(clone.get("hp")), SplitterCloneEntity.MAX_HP), "分身拥有独立生命值")
+	_check(is_equal_approx(clone.radius, module.settingf("clone_radius")), "分身读取配置中的独立碰撞半径")
+	_check(is_equal_approx(float(clone.get("hp")), 10.0), "分身拥有默认 10 点独立生命值")
 	clone.pos = Vector2(240.0, 220.0)
 	clone.velocity = Vector2(200.0, 0.0)
 	simulation.left.pos = Vector2(100.0, 100.0)
@@ -310,13 +330,26 @@ func _check_splitter_clone_bodies() -> void:
 	clone.velocity = Vector2(220.0, 0.0)
 	var target_hp_before := simulation.right.hp
 	var clone_hp_before := float(clone.get("hp"))
+	simulation.take_combat_events()
 	clone.process_step(simulation.battle_context, 0.0)
 	_check(is_equal_approx(
 		target_hp_before - simulation.right.hp,
-		SplitterCloneEntity.CONTACT_DAMAGE * simulation.damage_scale
+		module.settingf("clone_impact_damage") * simulation.damage_scale
 	), "分身撞击伤害固定为 2 并走统一伤害倍率")
-	_check(is_equal_approx(float(clone.get("hp")), clone_hp_before - SplitterCloneEntity.IMPACT_WEAR), "分身碰撞后独立掉血")
+	_check(is_equal_approx(float(clone.get("hp")), clone_hp_before - module.settingf("clone_impact_wear")), "分身碰撞后按配置独立掉血")
 	_check(int(simulation.stats.get("clone_contact_hits", 0)) == 1, "分身碰撞拥有独立命中统计")
+	_check(
+		_count_combat_events(simulation.take_combat_events(), "clone_impact") == 1,
+		"分身撞到敌方本体时触发独立撞击音效"
+	)
+	var main_contact := BattleSimulationScript.new(20260907, "splitter", "laser")
+	_prepare_contact(main_contact)
+	main_contact.take_combat_events()
+	main_contact._resolve_collision()
+	_check(
+		_count_combat_events(main_contact.take_combat_events(), "ram_impact") == 1,
+		"分裂球本体撞到敌方球时触发较重的撞击音效"
+	)
 	while simulation.count_entities(0, "splitter_clone") < 4:
 		simulation.left_ability.activate(simulation.battle_context, simulation.left, simulation.right, 0)
 	simulation.left_ability.after_entities_step(simulation.battle_context, simulation.left, simulation.right, 0, 0.0)
@@ -324,7 +357,7 @@ func _check_splitter_clone_bodies() -> void:
 	_check(SplitterCloneEntity.HEALTH_BARS_PER_ROW == 1, "分身血条每行固定排列一个")
 	for index in range(clones.size()):
 		_check(int(clones[index].call("health_bar_index")) == index, "存活分身血条按紧凑顺序排列")
-	clone.call("receive_collision_damage", simulation.battle_context, SplitterCloneEntity.MAX_HP)
+	clone.call("receive_collision_damage", simulation.battle_context, clone.get("max_hp"))
 	_check(clone.removed and is_zero_approx(float(clone.get("hp"))), "分身生命耗尽后独立死亡")
 	simulation.step(0.0)
 	_check(not simulation.entities.has(clone), "死亡分身由通用实体生命周期清理")
@@ -358,6 +391,7 @@ func _check_splitter_attack_reception() -> void:
 		"splitter_hit_test"
 	)
 	var projectile: BallProjectileEntity = projectile_simulation.entity_list(1, "projectile")[0]
+	projectile_simulation.take_combat_events()
 	projectile.process_step(projectile_simulation.battle_context, 0.2)
 	_check(projectile.removed, "非穿透投射物命中分身后立即消除")
 	_check(is_equal_approx(
@@ -365,6 +399,10 @@ func _check_splitter_attack_reception() -> void:
 		4.0 * projectile_simulation.damage_scale
 	), "敌方投射物按统一伤害倍率扣除分身生命")
 	_check(is_equal_approx(projectile_simulation.left.hp, main_hp_before), "被分身挡住的非穿透投射物不会继续命中本体")
+	_check(
+		_count_combat_events(projectile_simulation.take_combat_events(), "projectile_hit") == 1,
+		"浮游炮投射物命中分身时触发命中音效"
+	)
 
 	var friendly_clone := projectile_clones[1]
 	friendly_clone.pos = Vector2(300.0, 420.0)
@@ -414,7 +452,7 @@ func _check_splitter_attack_reception() -> void:
 			beam_simulation.left,
 			1
 		)
-		var expected_beam_damage := 20.6 * beam_simulation.damage_scale
+		var expected_beam_damage := minf(first_hp_before, BallRegistry.get_module("laser").settingf("laser_damage") * beam_simulation.damage_scale)
 		_check(is_equal_approx(first_hp_before - float(beam_clones[0].get("hp")), expected_beam_damage), "穿透激光会扣除路径上第一个分身生命")
 		_check(is_equal_approx(second_hp_before - float(beam_clones[1].get("hp")), expected_beam_damage), "穿透激光会继续命中路径上的后续分身")
 		_check(is_equal_approx(float(beam_clones[2].get("hp")), off_beam_hp_before), "攻击不会主动改为追踪光束外的分身")
@@ -467,9 +505,10 @@ func _check_splitter_attack_reception() -> void:
 			contact_clone
 		)
 		contact_clone.process_step(contact_simulation.battle_context, 0.0)
-		var expected_contact_damage := (
+		var expected_contact_damage: float = minf(
+			contact_hp_before,
 			sonic_contact_damage * contact_simulation.damage_scale
-			+ SplitterCloneEntity.IMPACT_WEAR
+			+ BallRegistry.get_module("splitter").settingf("clone_impact_wear")
 		)
 		_check(is_equal_approx(
 			contact_hp_before - float(contact_clone.get("hp")),
@@ -479,12 +518,17 @@ func _check_splitter_attack_reception() -> void:
 func _check_black_hole_orbit_force() -> void:
 	var simulation := BattleSimulationScript.new(20260822, "black_hole", "heaven")
 	_check(is_equal_approx(simulation.left.cooldown, 6.3), "黑洞技能发动间隔为原来 4.2 秒的 1.5 倍")
+	_check(
+		is_zero_approx(BallRegistry.get_module("black_hole").settingf("orbit_inward_speed_min")),
+		"黑洞径向控制不允许用负吸入速度产生斥力"
+	)
 	_check(is_equal_approx(
 		simulation.left_ability.speed_multiplier(simulation.battle_context, simulation.left, simulation.right, 0),
 		1.0
 	), "黑洞技能未发动时保持正常速度")
 	simulation.left.pos = Vector2(320.0, 320.0)
 	simulation.right.pos = Vector2(540.0, 320.0)
+	simulation.left.velocity = Vector2.ZERO
 	simulation.right.velocity = Vector2.ZERO
 	simulation.left_ability.activate(simulation.battle_context, simulation.left, simulation.right, 0)
 	_check(is_equal_approx(
@@ -498,7 +542,11 @@ func _check_black_hole_orbit_force() -> void:
 		0,
 		BattleSimulation.FIXED_STEP
 	)
-	_check(simulation.right.velocity.x < 0.0, "黑洞把目标牵引向轨道半径")
+	var initial_outward := (simulation.right.pos - simulation.left.pos).normalized()
+	_check(
+		(simulation.right.velocity - simulation.left.velocity).dot(initial_outward) < 0.0,
+		"黑洞把目标牵引向轨道半径"
+	)
 	_check(absf(simulation.right.velocity.y) > 0.0, "黑洞在吸引过程中加入柔和切向牵引")
 	_check(simulation.right.velocity.length() < 20.0, "黑洞单帧只施加连续加速度，不硬改目标速度")
 	_check(simulation.has_status(simulation.right, "vortex_tether:"), "目标进入黑洞漩涡牵引状态")
@@ -515,11 +563,54 @@ func _check_black_hole_orbit_force() -> void:
 	_check(angular_travel > 1.2, "黑洞牵引形成持续可见的绕行轨道")
 	_check(simulation.right.pos.distance_to(simulation.left.pos) < initial_distance - 28.0, "黑洞轨道会平滑收缩而不是停留在原半径")
 
+	var close_simulation := BattleSimulationScript.new(20260914, "black_hole", "heaven")
+	close_simulation.left.pos = Vector2(320.0, 320.0)
+	close_simulation.right.pos = Vector2(410.0, 320.0)
+	close_simulation.left.velocity = Vector2(80.0, 35.0)
+	close_simulation.right.velocity = close_simulation.left.velocity
+	close_simulation.left_ability.activate(
+		close_simulation.battle_context,
+		close_simulation.left,
+		close_simulation.right,
+		0
+	)
+	var close_initial_distance := close_simulation.right.pos.distance_to(close_simulation.left.pos)
+	var farthest_close_distance := close_initial_distance
+	for _frame in range(int(ceil(2.35 / BattleSimulation.FIXED_STEP))):
+		close_simulation.left_ability.before_motion(
+			close_simulation.battle_context,
+			close_simulation.left,
+			close_simulation.right,
+			0,
+			BattleSimulation.FIXED_STEP
+		)
+		close_simulation.left_ability.on_step(
+			close_simulation.battle_context,
+			close_simulation.left,
+			close_simulation.right,
+			0,
+			BattleSimulation.FIXED_STEP
+		)
+		close_simulation.left.pos += close_simulation.left.velocity * BattleSimulation.FIXED_STEP
+		close_simulation.right.pos += close_simulation.right.velocity * BattleSimulation.FIXED_STEP
+		farthest_close_distance = maxf(
+			farthest_close_distance,
+			close_simulation.right.pos.distance_to(close_simulation.left.pos)
+		)
+	_check(
+		farthest_close_distance <= close_initial_distance + 0.01,
+		"近距离目标的收缩轨道不会反向扩张"
+	)
+	_check(
+		close_simulation.right.pos.distance_to(close_simulation.left.pos) < close_initial_distance - 4.0,
+		"近距离目标仍会边绕行边靠近黑洞"
+	)
+
 func _check_black_hole_wall_damage() -> void:
 	var simulation := BattleSimulationScript.new(20260823, "black_hole", "heaven")
 	simulation.left_ability.activate(simulation.battle_context, simulation.left, simulation.right, 0)
 	simulation.right.pos = Vector2(
-		BattleSimulation.ARENA_SIZE.x - simulation.right.radius - 0.25,
+		simulation.arena_size().x - simulation.right.radius - 0.25,
 		320.0
 	)
 	simulation.right.velocity = Vector2(400.0, 0.0)
@@ -622,10 +713,61 @@ func _check_black_hole_absorption() -> void:
 func _check_time_limit_configuration() -> void:
 	var default_battle := BattleSimulationScript.new(20260825, "splitter", "heaven")
 	_check(is_equal_approx(default_battle.max_battle_time, 120.0), "普通对局默认时限为两分钟")
-	var boss_battle := BattleSimulationScript.new(20260825, "vampire", "six_king")
-	_check(is_equal_approx(boss_battle.max_battle_time, 120.0), "默认 Boss 对局时限为两分钟")
+	var showcase_battle := BattleSimulationScript.new(20260825, "vampire", "six_king")
+	_check(is_equal_approx(showcase_battle.max_battle_time, 120.0), "默认展示对局时限为两分钟")
 	var configured_battle := BattleSimulationScript.new(20260825, "splitter", "heaven", 75.0)
 	_check(is_equal_approx(configured_battle.max_battle_time, 75.0), "调用方可以覆盖单局时限")
+
+func _check_global_settings_configuration() -> void:
+	var test_path := "user://ability_ball_global_settings_test.json"
+	var configuration = GlobalGameSettingsScript.new({
+		"battle_time_seconds": 95,
+		"arena_width": 900,
+		"arena_height": 500,
+	})
+	_check(configuration.settingi("battle_time_seconds") == 95, "全局设置保存默认对局时限")
+	_check(configuration.arena_size() == Vector2(900.0, 500.0), "全局设置保存实际竞技场宽高")
+	var simulation := BattleSimulationScript.new(
+		20260912,
+		"splitter",
+		"heaven",
+		configuration.settingf("battle_time_seconds"),
+		configuration.arena_size()
+	)
+	_check(is_equal_approx(simulation.max_battle_time, 95.0), "全局时限进入新对局")
+	_check(simulation.arena_size() == Vector2(900.0, 500.0), "自定义竞技场尺寸进入模拟器")
+	_check(_inside_arena(simulation.left, simulation.arena_size()), "缩放后的左侧出生点位于自定义竞技场")
+	_check(_inside_arena(simulation.right, simulation.arena_size()), "缩放后的右侧出生点位于自定义竞技场")
+	simulation.left.pos = Vector2(899.0, 250.0)
+	simulation.left.velocity = Vector2(300.0, 0.0)
+	simulation.step(BattleSimulation.FIXED_STEP)
+	_check(
+		simulation.left.pos.x <= simulation.arena_size().x - simulation.left.radius,
+		"自定义宽度成为真实墙面碰撞边界"
+	)
+	var ray_end := simulation.ray_to_arena_edge(Vector2(450.0, 250.0), Vector2.RIGHT)
+	_check(is_equal_approx(ray_end.x, 900.0), "射线与技能查询使用自定义竞技场边界")
+	var snapshot: Dictionary = configuration.settings_snapshot()
+	_check(GlobalSettingsStoreScript.save_settings(snapshot, test_path) == OK, "全局设置能够写入独立持久化文件")
+	var loaded = GlobalGameSettingsScript.new(GlobalSettingsStoreScript.load_settings(test_path))
+	_check(loaded.settings_snapshot() == snapshot, "全局设置保存后可以无损读回")
+	var reloaded_simulation := BattleSimulationScript.new(
+		20260913,
+		"laser",
+		"black_hole",
+		loaded.settingf("battle_time_seconds"),
+		loaded.arena_size()
+	)
+	_check(reloaded_simulation.arena_size() == Vector2(900.0, 500.0), "全局竞技场设置跨组合生效")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(test_path))
+	var normalized = GlobalGameSettingsScript.new({
+		"battle_time_seconds": 2,
+		"arena_width": 9999,
+		"arena_height": "invalid",
+	})
+	_check(normalized.settingi("battle_time_seconds") == 15, "全局时限按 Schema 下限收敛")
+	_check(normalized.settingi("arena_width") == 1920, "竞技场宽度按 Schema 上限收敛")
+	_check(normalized.settingi("arena_height") == 640, "非法竞技场高度恢复默认值")
 
 func _check_visual_rng_isolation() -> void:
 	var baseline := BattleSimulationScript.new(20260826, "splitter", "heaven")
@@ -636,6 +778,93 @@ func _check_visual_rng_isolation() -> void:
 		extra_effects.step(BattleSimulation.FIXED_STEP)
 	_check(baseline.snapshot() == extra_effects.snapshot(), "增减纯视觉粒子不会改变游戏轨迹或胜负规则")
 
+func _check_settings_configuration() -> void:
+	var test_path := "user://ability_ball_settings_test.json"
+	BallRegistry.configure_settings({
+		"splitter": {
+			"max_hp": 145.0,
+			"max_clones": 7,
+			"clone_max_hp": 25.0,
+			"body_impact_damage": 9.0,
+		},
+		"replicator": {
+			"max_cannons": 3,
+			"projectile_damage": 17.0,
+		},
+		"black_hole": {
+			"orbit_inward_speed_min": -72.0,
+		},
+	})
+	_check(
+		is_zero_approx(BallRegistry.get_module("black_hole").settingf("orbit_inward_speed_min")),
+		"旧配置中的负径向速度会被归一化为零，不再恢复斥力"
+	)
+	var splitter_simulation := BattleSimulationScript.new(20260908, "splitter", "laser")
+	_check(is_equal_approx(splitter_simulation.left.max_hp, 145.0), "自定义本体生命值进入新对局")
+	var splitter_other_matchup := BattleSimulationScript.new(20260910, "splitter", "heaven")
+	_check(
+		is_equal_approx(splitter_other_matchup.left.max_hp, 145.0),
+		"同一球切换对手后继续使用自己的配置"
+	)
+	_check(is_equal_approx(splitter_other_matchup.right.max_hp, 100.0), "对手继续使用自己的独立配置")
+	_check(is_equal_approx(
+		splitter_simulation.left_ability.contact_damage(
+			splitter_simulation.battle_context,
+			splitter_simulation.left,
+			splitter_simulation.right
+		),
+		9.0
+	), "自定义本体撞击伤害进入能力实例")
+	for _activation in range(4):
+		splitter_simulation.left_ability.activate(
+			splitter_simulation.battle_context,
+			splitter_simulation.left,
+			splitter_simulation.right,
+			0
+		)
+	var custom_clones := splitter_simulation.entity_list(0, "splitter_clone")
+	_check(custom_clones.size() == 7, "自定义分身上限限制实际生成数量")
+	if not custom_clones.is_empty():
+		_check(is_equal_approx(float(custom_clones[0].get("max_hp")), 25.0), "自定义附属物生命值进入分身实体")
+	var replicator_simulation := BattleSimulationScript.new(20260909, "replicator", "laser")
+	for _activation in range(5):
+		replicator_simulation.left_ability.activate(
+			replicator_simulation.battle_context,
+			replicator_simulation.left,
+			replicator_simulation.right,
+			0
+		)
+	_check(replicator_simulation.count_entities(0, "clone") == 3, "自定义浮游炮上限限制实际炮数")
+	var projectiles := replicator_simulation.entity_list(0, "projectile")
+	_check(
+		not projectiles.is_empty()
+		and is_equal_approx(float(projectiles[-1].get("damage_amount")), 17.0),
+		"自定义子弹攻击力进入投射物"
+	)
+	var snapshot := BallRegistry.settings_snapshot()
+	var save_error := BallSettingsStoreScript.save_settings(snapshot, test_path)
+	_check(save_error == OK, "球参数能够写入持久化文件")
+	var loaded := BallSettingsStoreScript.load_settings(test_path)
+	BallRegistry.configure_settings(loaded)
+	_check(BallRegistry.settings_snapshot() == snapshot, "持久化球参数经 Schema 归一化后可以无损读回")
+	var reloaded_matchup := BattleSimulationScript.new(20260911, "splitter", "vampire")
+	_check(is_equal_approx(reloaded_matchup.left.max_hp, 145.0), "持久化重载后球配置继续进入其他组合")
+	_check(is_equal_approx(reloaded_matchup.right.max_hp, 100.0), "持久化重载不会把配置串给另一种球")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(test_path))
+	BallRegistry.configure_settings({"splitter": {"max_hp": -5.0, "max_clones": 999}})
+	_check(is_equal_approx(BallRegistry.get_module("splitter").max_hp, 1.0), "非法生命值按 Schema 下限收敛")
+	_check(BallRegistry.get_module("splitter").settingi("max_clones") == 100, "非法分身上限按 Schema 上限收敛")
+	BallRegistry.configure_settings({})
+	for ball_id in BallRegistry.ids():
+		_check(is_equal_approx(BallRegistry.get_module(ball_id).max_hp, 100.0), "%s 恢复默认后生命值为 100" % ball_id)
+
 func _check(condition: bool, label: String) -> void:
 	if not condition:
 		failures.append(label)
+
+func _count_combat_events(events: Array[Dictionary], kind: String) -> int:
+	var count := 0
+	for event in events:
+		if String(event.get("kind", "")) == kind:
+			count += 1
+	return count

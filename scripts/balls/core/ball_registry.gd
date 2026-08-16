@@ -7,6 +7,18 @@ static var _loaded := false
 static var _modules := {}
 static var _ordered_modules: Array = []
 static var _errors := PackedStringArray()
+static var _runtime_settings := {}
+
+static func configure_settings(settings: Dictionary) -> void:
+	_runtime_settings = settings.duplicate(true)
+	reload()
+
+static func settings_snapshot() -> Dictionary:
+	_ensure_loaded()
+	var result := {}
+	for module: BallModule in _ordered_modules:
+		result[module.id] = module.settings_snapshot()
+	return result
 
 static func reload() -> void:
 	_loaded = false
@@ -59,6 +71,8 @@ static func _ensure_loaded() -> void:
 		if not module is BallModule:
 			_errors.append("%s does not extend BallModule" % entry_path)
 			continue
+		var module_settings: Dictionary = _runtime_settings.get(module.id, {})
+		module.apply_settings(module_settings)
 		for error in module.validation_errors():
 			_errors.append(error)
 		if module.id.is_empty():

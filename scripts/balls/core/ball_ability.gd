@@ -6,6 +6,15 @@ var module: BallModule
 func configure(owner_module: BallModule) -> void:
 	module = owner_module
 
+func setting(key: String):
+	return module.setting(key)
+
+func settingf(key: String) -> float:
+	return module.settingf(key)
+
+func settingi(key: String) -> int:
+	return module.settingi(key)
+
 func before_motion(_battle, _fighter, _opponent, _side: int, _delta: float) -> void:
 	pass
 

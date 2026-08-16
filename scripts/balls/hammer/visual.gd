@@ -4,13 +4,15 @@ func draw_underlay(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var scale_factor: float = context["scale_factor"]
 	var position: Vector2 = context["position"]
 	var shake_offset: Vector2 = context["shake_offset"]
+	var reach := module.settingf("hammer_reach")
+	var head_start := reach - 24.0
 	canvas.draw_set_transform(position + shake_offset, ability.orbit_angle(), Vector2.ONE * scale_factor)
-	canvas.draw_line(Vector2(8.0, 0.0), Vector2(116.0, 0.0), Color("b8936c"), 9.0, true)
-	canvas.draw_line(Vector2(14.0, -2.0), Vector2(112.0, -2.0), Color(0.9, 0.78, 0.62, 0.65), 2.0, true)
-	canvas.draw_rect(Rect2(Vector2(94.0, -28.0), Vector2(52.0, 56.0)), Color("5e646b"))
-	canvas.draw_rect(Rect2(Vector2(98.0, -24.0), Vector2(44.0, 48.0)), Color("b4bbc1"), false, 3.0)
-	canvas.draw_circle(Vector2(106.0, -16.0), 3.5, Color("eef1f4"))
-	canvas.draw_circle(Vector2(134.0, 16.0), 3.5, Color("eef1f4"))
+	canvas.draw_line(Vector2(8.0, 0.0), Vector2(reach - 2.0, 0.0), Color("b8936c"), 9.0, true)
+	canvas.draw_line(Vector2(14.0, -2.0), Vector2(reach - 6.0, -2.0), Color(0.9, 0.78, 0.62, 0.65), 2.0, true)
+	canvas.draw_rect(Rect2(Vector2(head_start, -28.0), Vector2(52.0, 56.0)), Color("5e646b"))
+	canvas.draw_rect(Rect2(Vector2(head_start + 4.0, -24.0), Vector2(44.0, 48.0)), Color("b4bbc1"), false, 3.0)
+	canvas.draw_circle(Vector2(head_start + 12.0, -16.0), 3.5, Color("eef1f4"))
+	canvas.draw_circle(Vector2(head_start + 40.0, 16.0), 3.5, Color("eef1f4"))
 	canvas.draw_set_transform(shake_offset, 0.0, Vector2.ONE)
 
 func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:

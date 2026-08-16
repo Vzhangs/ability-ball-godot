@@ -1,20 +1,13 @@
 extends BallEntity
 
-const BODY_RADIUS := 13.0
-const MAX_HP := 12.0
-const CONTACT_DAMAGE := 2.0
-const IMPACT_WEAR := 2.0
-const CONTACT_INTERVAL := 0.32
-const MINIMUM_SPEED := 175.0
-const MAXIMUM_SPEED := 285.0
 const HEALTH_BARS_PER_ROW := 1
 const HEALTH_BAR_WIDTH := 40.0
 const HEALTH_BAR_HEIGHT := 2.0
 const HEALTH_BAR_VERTICAL_GAP := 2.0
 const HEALTH_BAR_TOP_GAP := 8.0
 
-var hp := MAX_HP
-var max_hp := MAX_HP
+var hp := 10.0
+var max_hp := 10.0
 
 var _clone_id := 0
 var _health_bar_index := 0
@@ -22,6 +15,13 @@ var _color := Color.WHITE
 var _accent := Color.WHITE
 var _contact_timer := 0.0
 var _hit_flash := 0.0
+var _impact_damage := 0.0
+var _impact_wear := 0.0
+var _contact_interval := 0.1
+var _minimum_speed := 20.0
+var _maximum_speed := 20.0
+var _wall_bounce_spread := 0.0
+var _target_velocity_ratio := 0.0
 
 func _init(
 	spawn_owner_side: int,
@@ -29,12 +29,22 @@ func _init(
 	spawn_velocity: Vector2,
 	color: Color,
 	accent: Color,
-	spawn_clone_id: int
+	spawn_clone_id: int,
+	config: Dictionary
 ) -> void:
 	owner_side = spawn_owner_side
 	pos = spawn_position
 	velocity = spawn_velocity
-	radius = BODY_RADIUS
+	radius = float(config["radius"])
+	max_hp = float(config["max_hp"])
+	hp = max_hp
+	_impact_damage = float(config["impact_damage"])
+	_impact_wear = float(config["impact_wear"])
+	_contact_interval = float(config["contact_interval"])
+	_minimum_speed = float(config["minimum_speed"])
+	_maximum_speed = maxf(_minimum_speed, float(config["maximum_speed"]))
+	_wall_bounce_spread = float(config["wall_bounce_spread"])
+	_target_velocity_ratio = float(config["target_velocity_ratio"])
 	_color = color
 	_accent = accent
 	_clone_id = spawn_clone_id
@@ -46,6 +56,9 @@ func clone_id() -> int:
 
 func health_bar_index() -> int:
 	return _health_bar_index
+
+func collision_damage() -> float:
+	return _impact_damage
 
 func set_health_bar_index(index: int) -> void:
 	_health_bar_index = maxi(0, index)
@@ -141,13 +154,13 @@ func absorption_visual_color() -> Color:
 
 func _normalize_speed() -> void:
 	if velocity.length_squared() <= 0.001:
-		velocity = Vector2.RIGHT.rotated(float(_clone_id) * 1.618) * MINIMUM_SPEED
+		velocity = Vector2.RIGHT.rotated(float(_clone_id) * 1.618) * _minimum_speed
 		return
 	var speed := velocity.length()
-	if speed < MINIMUM_SPEED:
-		velocity = velocity.normalized() * MINIMUM_SPEED
-	elif speed > MAXIMUM_SPEED:
-		velocity = velocity.normalized() * MAXIMUM_SPEED
+	if speed < _minimum_speed:
+		velocity = velocity.normalized() * _minimum_speed
+	elif speed > _maximum_speed:
+		velocity = velocity.normalized() * _maximum_speed
 
 func _resolve_wall_collision(battle) -> void:
 	var arena_size: Vector2 = battle.arena_size()
@@ -169,7 +182,7 @@ func _resolve_wall_collision(battle) -> void:
 		velocity.y = -absf(velocity.y)
 		bounced = true
 	if bounced:
-		velocity = velocity.rotated(battle.random_range(-0.045, 0.045))
+		velocity = velocity.rotated(battle.random_range(-_wall_bounce_spread, _wall_bounce_spread))
 		battle.spawn_particles(pos, _accent, 2, 48.0)
 
 func _resolve_fighter_collision(battle) -> void:
@@ -184,22 +197,22 @@ func _resolve_fighter_collision(battle) -> void:
 		normal = Vector2.RIGHT
 	pos -= normal * (minimum_distance - maxf(distance, 0.001))
 	if velocity.dot(normal) > 0.0:
-		velocity = velocity.bounce(normal) + target.velocity * 0.12
+		velocity = velocity.bounce(normal) + target.velocity * _target_velocity_ratio
 	if _contact_timer > 0.0:
 		return
-	_contact_timer = CONTACT_INTERVAL
+	_contact_timer = _contact_interval
 	var source = battle.fighter_for_side(owner_side)
-	battle.damage(target, CONTACT_DAMAGE, _accent, source)
+	battle.damage(target, _impact_damage, _accent, source)
 	var target_side: int = battle.side_for_fighter(target)
 	var counter_damage: float = battle.contact_damage_for_side(target_side, self)
 	if counter_damage > 0.0:
 		battle.damage_entity(self, counter_damage, target.accent, target_side)
 	if not removed:
-		receive_collision_damage(battle, IMPACT_WEAR)
+		receive_collision_damage(battle, _impact_wear)
 	battle.record_stat("clone_contact_hits")
 	battle.spawn_ring(pos + normal * radius, _accent, 4.0, 32.0, 0.2)
 	battle.spawn_particles(pos + normal * radius, _accent, 4, 92.0)
-	battle.emit_combat_event("impact", 0.25)
+	battle.emit_combat_event("clone_impact", 0.42)
 
 func resolve_clone_collision(battle, other: BallEntity) -> void:
 	if other == self or removed or other.removed:
@@ -220,14 +233,16 @@ func resolve_clone_collision(battle, other: BallEntity) -> void:
 		other.velocity += normal * impulse
 	if owner_side == other.owner_side or _contact_timer > 0.0 or not bool(other.call("can_receive_clone_contact")):
 		return
-	_contact_timer = CONTACT_INTERVAL
+	_contact_timer = _contact_interval
 	other.call("begin_clone_contact")
-	receive_collision_damage(battle, CONTACT_DAMAGE)
-	other.call("receive_collision_damage", battle, CONTACT_DAMAGE)
+	var other_damage := float(other.call("collision_damage"))
+	receive_collision_damage(battle, other_damage)
+	other.call("receive_collision_damage", battle, _impact_damage)
 	battle.record_stat("clone_duel_hits")
+	battle.emit_combat_event("clone_impact", 0.36)
 
 func can_receive_clone_contact() -> bool:
 	return not removed and _contact_timer <= 0.0
 
 func begin_clone_contact() -> void:
-	_contact_timer = CONTACT_INTERVAL
+	_contact_timer = _contact_interval

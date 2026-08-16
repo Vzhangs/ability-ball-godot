@@ -2,12 +2,22 @@ extends BallStatusEffect
 
 var _color := Color("bc63ff")
 var _wall_damage_cooldown := 0.0
+var _wall_damage := 0.0
+var _wall_damage_interval := 0.1
 
-func _init(duration: float, effect_source_side: int, color: Color) -> void:
+func _init(
+	duration: float,
+	effect_source_side: int,
+	color: Color,
+	wall_damage: float,
+	wall_damage_interval: float
+) -> void:
 	key = "vortex_tether:%d" % effect_source_side
 	remaining = duration
 	source_side = effect_source_side
 	_color = color
+	_wall_damage = wall_damage
+	_wall_damage_interval = wall_damage_interval
 
 func tick(battle, target, delta: float) -> void:
 	super(battle, target, delta)
@@ -22,8 +32,8 @@ func on_wall_hit(battle, target) -> void:
 	var source = battle.fighter_for_side(source_side)
 	if source == null or source.hp <= 0.0:
 		return
-	_wall_damage_cooldown = 0.24
-	var applied: float = battle.damage(target, 15.0, _color, source, true)
+	_wall_damage_cooldown = _wall_damage_interval
+	var applied: float = battle.damage(target, _wall_damage, _color, source, true)
 	if applied <= 0.0:
 		return
 	battle.record_stat("gravity_wall_hits")

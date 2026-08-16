@@ -1,11 +1,12 @@
 extends BallEntity
 
 var cells: Array[Dictionary] = []
-var _duration := 1.35
+var _duration := 1.0
 
-func _init(spawn_owner_side: int, checker_cells: Array[Dictionary]) -> void:
+func _init(spawn_owner_side: int, checker_cells: Array[Dictionary], duration: float) -> void:
 	owner_side = spawn_owner_side
 	cells = checker_cells
+	_duration = duration
 	remaining = _duration
 	tags = PackedStringArray(["showcase_checker"])
 	draw_layer = -50

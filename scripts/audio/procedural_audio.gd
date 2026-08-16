@@ -53,6 +53,36 @@ func play_event(kind: String, strength: float = 1.0) -> void:
 			voice["frequency"] = 145.0
 			voice["frequency_end"] = 58.0
 			voice["noise"] = 0.2
+		"volley":
+			voice["duration"] = 0.13
+			voice["frequency"] = 235.0
+			voice["frequency_end"] = 82.0
+			voice["wave"] = "square"
+			voice["noise"] = 0.16
+		"projectile_hit":
+			voice["duration"] = 0.085
+			voice["frequency"] = 760.0
+			voice["frequency_end"] = 225.0
+			voice["wave"] = "triangle"
+			voice["noise"] = 0.24
+		"split":
+			voice["duration"] = 0.24
+			voice["frequency"] = 255.0
+			voice["frequency_end"] = 710.0
+			voice["wave"] = "triangle"
+			voice["noise"] = 0.035
+		"clone_impact":
+			voice["duration"] = 0.095
+			voice["frequency"] = 275.0
+			voice["frequency_end"] = 105.0
+			voice["wave"] = "triangle"
+			voice["noise"] = 0.2
+		"ram_impact":
+			voice["duration"] = 0.18
+			voice["frequency"] = 128.0
+			voice["frequency_end"] = 43.0
+			voice["wave"] = "saw"
+			voice["noise"] = 0.28
 		"judgment":
 			voice["duration"] = 0.28
 			voice["frequency"] = 880.0
@@ -76,6 +106,19 @@ func play_event(kind: String, strength: float = 1.0) -> void:
 	_voices.append(voice)
 	while _voices.size() > MAX_VOICES:
 		_voices.pop_front()
+
+func supports_event(kind: String) -> bool:
+	return kind in [
+		"impact",
+		"volley",
+		"projectile_hit",
+		"split",
+		"clone_impact",
+		"ram_impact",
+		"judgment",
+		"track",
+		"blood",
+	]
 
 func _process(_delta: float) -> void:
 	if _playback == null:

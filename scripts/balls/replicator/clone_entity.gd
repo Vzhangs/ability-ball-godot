@@ -1,12 +1,5 @@
 extends BallEntity
 
-const MAX_CANNONS := 22
-const INNER_RING_CAPACITY := 8
-const OUTER_RING_CAPACITY := 14
-const INNER_ORBIT_RADIUS := 54.0
-const OUTER_ORBIT_RADIUS := 82.0
-const CANNON_RADIUS_SCALE := 0.36
-
 var _owner
 var _ability
 var _formation_slot := 0
@@ -17,7 +10,7 @@ func _init(spawn_owner_side: int, owner, owner_ability) -> void:
 	_owner = owner
 	_ability = owner_ability
 	pos = owner.pos
-	radius = owner.radius * CANNON_RADIUS_SCALE
+	radius = owner.radius * _ability.cannon_radius_scale()
 	tags = PackedStringArray(["clone"])
 	draw_layer = -5
 
@@ -25,15 +18,15 @@ func step(_battle, _delta: float) -> void:
 	_update_position()
 
 func set_formation_slot(slot: int, total_count: int) -> void:
-	_formation_slot = clampi(slot, 0, MAX_CANNONS - 1)
-	_formation_count = clampi(total_count, 1, MAX_CANNONS)
+	_formation_slot = clampi(slot, 0, _ability.max_cannons() - 1)
+	_formation_count = clampi(total_count, 1, _ability.max_cannons())
 	_update_position()
 
 func formation_ring() -> int:
-	return 0 if _formation_slot < mini(_formation_count, INNER_RING_CAPACITY) else 1
+	return 0 if _formation_slot < mini(_formation_count, _ability.inner_ring_capacity()) else 1
 
 func formation_slot() -> int:
-	return _formation_slot if formation_ring() == 0 else _formation_slot - INNER_RING_CAPACITY
+	return _formation_slot if formation_ring() == 0 else _formation_slot - _ability.inner_ring_capacity()
 
 func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	var scale_factor := context.scale_factor
@@ -60,14 +53,15 @@ func absorption_visual_color() -> Color:
 
 func _update_position() -> void:
 	var ring := formation_ring()
-	var ring_count: int = mini(_formation_count, INNER_RING_CAPACITY)
+	var inner_capacity: int = _ability.inner_ring_capacity()
+	var ring_count: int = mini(_formation_count, inner_capacity)
 	var ring_slot := _formation_slot
-	var orbit_radius := INNER_ORBIT_RADIUS
+	var orbit_radius: float = _ability.inner_orbit_radius()
 	var phase_offset := 0.0
 	if ring == 1:
-		ring_count = mini(_formation_count - INNER_RING_CAPACITY, OUTER_RING_CAPACITY)
-		ring_slot = _formation_slot - INNER_RING_CAPACITY
-		orbit_radius = OUTER_ORBIT_RADIUS
+		ring_count = _formation_count - inner_capacity
+		ring_slot = _formation_slot - inner_capacity
+		orbit_radius = _ability.outer_orbit_radius()
 		phase_offset = PI / float(maxi(1, ring_count))
 	var angle: float = _ability.orbit_angle() + phase_offset + TAU * float(ring_slot) / float(maxi(1, ring_count))
 	pos = _owner.pos + Vector2.from_angle(angle) * orbit_radius

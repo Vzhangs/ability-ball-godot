@@ -6,8 +6,6 @@ func _init() -> void:
 	right_ball_id = "six_king"
 	left_profile = "showcase"
 	right_profile = "showcase"
-	damage_scale = 1.0
-	recovery_scale = 1.0
 	contact_cooldown = 0.42
 	collision_impulse = 0.91
 	trail_interval = 0.045

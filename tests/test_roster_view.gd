@@ -1,6 +1,9 @@
 extends SceneTree
 
 const BattleViewScript := preload("res://scripts/ui/battle_view.gd")
+const BallSettingsDialogScript := preload("res://scripts/ui/ball_settings_dialog.gd")
+const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
+const GlobalSettingsDialogScript := preload("res://scripts/ui/global_settings_dialog.gd")
 
 var failures: Array[String] = []
 
@@ -8,8 +11,11 @@ func _init() -> void:
 	_run.call_deferred()
 
 func _run() -> void:
+	BallRegistry.configure_settings({})
 	_check_viewport_margin()
 	_check_health_hud_policy()
+	await _check_settings_dialog()
+	await _check_global_settings_dialog()
 	await _check_replicator_dual_ring_view()
 	await _check_splitter_swarm_view()
 	var ids := BallRegistry.ids()
@@ -39,11 +45,18 @@ func _check_viewport_margin() -> void:
 	view.size = Vector2(650.0, 650.0)
 	var visible_world := view.visible_world_size()
 	var arena_rect := view.arena_screen_rect()
-	_check(is_equal_approx(visible_world.x / BattleSimulation.ARENA_SIZE.x, 1.2), "游戏世界视野宽度为碰撞场地的 120%")
-	_check(is_equal_approx(visible_world.y / BattleSimulation.ARENA_SIZE.y, 1.2), "游戏世界视野高度为碰撞场地的 120%")
+	_check(is_equal_approx(visible_world.x / BattleSimulation.DEFAULT_ARENA_SIZE.x, 1.2), "游戏世界视野宽度为碰撞场地的 120%")
+	_check(is_equal_approx(visible_world.y / BattleSimulation.DEFAULT_ARENA_SIZE.y, 1.2), "游戏世界视野高度为碰撞场地的 120%")
 	_check(arena_rect.position.x > 0.0 and arena_rect.position.y > 0.0, "碰撞盒四周保留可视窗口留白")
 	_check(arena_rect.end.x < view.size.x and arena_rect.end.y < view.size.y, "碰撞盒边界与窗口裁切边界相互独立")
 	_check(is_equal_approx(arena_rect.size.x / view.size.x, 1.0 / 1.2), "碰撞盒在窗口内按 1:1.2 比例显示")
+	view.start_battle(20260914, "splitter", "heaven", 85.0, Vector2(900.0, 500.0))
+	visible_world = view.visible_world_size()
+	arena_rect = view.arena_screen_rect()
+	_check(view.simulation.arena_size() == Vector2(900.0, 500.0), "自定义竞技场尺寸进入真实战斗视图")
+	_check(is_equal_approx(visible_world.x / 900.0, 1.2), "自定义竞技场保持横向 120% 可视世界")
+	_check(is_equal_approx(visible_world.y / 500.0, 1.2), "自定义竞技场保持纵向 120% 可视世界")
+	_check(is_equal_approx(arena_rect.size.x / arena_rect.size.y, 900.0 / 500.0), "碰撞白框按自定义宽高比绘制")
 	view.free()
 
 func _check_health_hud_policy() -> void:
@@ -59,6 +72,40 @@ func _check_health_hud_policy() -> void:
 	_check(not view_source.contains("simulation.phase"), "公共 HUD 不读取全局阶段")
 	_check(not view_source.contains("phase_center"), "公共 HUD 不绘制三阶段指示器")
 	_check(not main_source.contains("status_label"), "战斗框下方不再重复标注双方血量")
+	_check(main_source.contains("BallSettingsStoreScript.save_settings"), "球参数保存后由入口自动持久化")
+	_check(main_source.contains("GlobalSettingsStoreScript.save_settings"), "全局设置保存后由入口自动持久化")
+	_check(not main_source.contains("time_limit_spin_box"), "对局时限只有全局设置一个界面事实源")
+
+func _check_settings_dialog() -> void:
+	var dialog = BallSettingsDialogScript.new()
+	get_root().add_child(dialog)
+	dialog.open_settings(BallRegistry.settings_snapshot(), "splitter")
+	await process_frame
+	_check(dialog.visible, "球参数弹窗可以正常打开")
+	var controls := dialog.find_children("*", "SpinBox", true, false)
+	_check(
+		controls.size() == BallRegistry.get_module("splitter").setting_specs().size(),
+		"弹窗按分裂球 Schema 自动生成全部数值输入框"
+	)
+	dialog.hide()
+	dialog.queue_free()
+	await process_frame
+
+func _check_global_settings_dialog() -> void:
+	var dialog = GlobalSettingsDialogScript.new()
+	get_root().add_child(dialog)
+	dialog.open_settings({
+		"battle_time_seconds": 90,
+		"arena_width": 900,
+		"arena_height": 500,
+	})
+	await process_frame
+	_check(dialog.visible, "全局设置弹窗可以正常打开")
+	var controls := dialog.find_children("*", "SpinBox", true, false)
+	_check(controls.size() == GlobalGameSettingsScript.SETTING_SPECS.size(), "全局设置弹窗按 Schema 生成全部输入框")
+	dialog.hide()
+	dialog.queue_free()
+	await process_frame
 
 func _check_replicator_dual_ring_view() -> void:
 	var view: BattleView = BattleViewScript.new()

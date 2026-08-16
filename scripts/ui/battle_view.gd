@@ -32,8 +32,20 @@ func _ready() -> void:
 		start_battle(20260815, ids[0], ids[1])
 	set_process(true)
 
-func start_battle(seed_value: int, left_ball_id: String, right_ball_id: String, time_limit_seconds: float = -1.0) -> void:
-	simulation = BattleSimulationScript.new(seed_value, left_ball_id, right_ball_id, time_limit_seconds)
+func start_battle(
+	seed_value: int,
+	left_ball_id: String,
+	right_ball_id: String,
+	time_limit_seconds: float = -1.0,
+	battle_arena_size: Vector2 = BattleSimulation.DEFAULT_ARENA_SIZE
+) -> void:
+	simulation = BattleSimulationScript.new(
+		seed_value,
+		left_ball_id,
+		right_ball_id,
+		time_limit_seconds,
+		battle_arena_size
+	)
 	left_visual = simulation.left_module.create_visual(simulation.left_ability, simulation.left_profile)
 	right_visual = simulation.right_module.create_visual(simulation.right_ability, simulation.right_profile)
 	_accumulator = 0.0
@@ -110,10 +122,10 @@ func _draw() -> void:
 		_draw_result_card()
 
 func visible_world_size() -> Vector2:
-	return BattleSimulation.ARENA_SIZE * VISIBLE_WORLD_SCALE
+	return _battle_arena_size() * VISIBLE_WORLD_SCALE
 
 func arena_screen_rect() -> Rect2:
-	return Rect2(_origin(), BattleSimulation.ARENA_SIZE * _scale_factor())
+	return Rect2(_origin(), _battle_arena_size() * _scale_factor())
 
 func health_hud_bounds(side: int) -> Rect2:
 	var x := 13.0 if side == 0 else size.x - 13.0 - HEALTH_BAR_WIDTH
@@ -124,20 +136,34 @@ func _scale_factor() -> float:
 	return minf(size.x / world_size.x, size.y / world_size.y)
 
 func _origin() -> Vector2:
-	return (size - BattleSimulation.ARENA_SIZE * _scale_factor()) * 0.5
+	return (size - _battle_arena_size() * _scale_factor()) * 0.5
+
+func _battle_arena_size() -> Vector2:
+	return simulation.arena_size() if simulation != null else BattleSimulation.DEFAULT_ARENA_SIZE
 
 func _p(value: Vector2) -> Vector2:
 	return _origin() + value * _scale_factor()
 
 func _draw_background_grid() -> void:
 	var scale_factor := _scale_factor()
+	var arena_size := _battle_arena_size()
 	draw_rect(arena_screen_rect(), Color("080b0e"))
-	for coordinate in range(80, 640, 80):
-		var alpha := 0.055 if coordinate % 160 != 0 else 0.085
-		draw_line(_p(Vector2(coordinate, 0.0)), _p(Vector2(coordinate, 640.0)), Color(0.5, 0.68, 0.78, alpha), 1.0)
-		draw_line(_p(Vector2(0.0, coordinate)), _p(Vector2(640.0, coordinate)), Color(0.5, 0.68, 0.78, alpha), 1.0)
-	draw_circle(_p(Vector2(320.0, 320.0)), 218.0 * scale_factor, Color(0.55, 0.66, 0.72, 0.06), false, 1.5)
-	draw_circle(_p(Vector2(320.0, 320.0)), 105.0 * scale_factor, Color(0.55, 0.66, 0.72, 0.05), false, 1.0)
+	var coordinate := 80.0
+	while coordinate < arena_size.x:
+		var vertical_index := int(round(coordinate / 80.0))
+		var vertical_alpha := 0.055 if vertical_index % 2 != 0 else 0.085
+		draw_line(_p(Vector2(coordinate, 0.0)), _p(Vector2(coordinate, arena_size.y)), Color(0.5, 0.68, 0.78, vertical_alpha), 1.0)
+		coordinate += 80.0
+	coordinate = 80.0
+	while coordinate < arena_size.y:
+		var horizontal_index := int(round(coordinate / 80.0))
+		var horizontal_alpha := 0.055 if horizontal_index % 2 != 0 else 0.085
+		draw_line(_p(Vector2(0.0, coordinate)), _p(Vector2(arena_size.x, coordinate)), Color(0.5, 0.68, 0.78, horizontal_alpha), 1.0)
+		coordinate += 80.0
+	var center := arena_size * 0.5
+	var reference_extent := minf(arena_size.x, arena_size.y)
+	draw_circle(_p(center), reference_extent * 0.34 * scale_factor, Color(0.55, 0.66, 0.72, 0.06), false, 1.5)
+	draw_circle(_p(center), reference_extent * 0.164 * scale_factor, Color(0.55, 0.66, 0.72, 0.05), false, 1.0)
 
 func _draw_beams() -> void:
 	for beam in simulation.beams:

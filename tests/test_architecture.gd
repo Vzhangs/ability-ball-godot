@@ -1,5 +1,7 @@
 extends SceneTree
 
+const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
+
 const CORE_FILES := [
 	"res://scripts/simulation/battle_simulation.gd",
 	"res://scripts/balls/core/ball_ability.gd",
@@ -11,9 +13,14 @@ const CORE_FILES := [
 	"res://scripts/balls/core/ball_status_effect.gd",
 	"res://scripts/balls/core/ball_visual.gd",
 	"res://scripts/balls/core/projectile_entity.gd",
+	"res://scripts/settings/ball_settings_store.gd",
+	"res://scripts/settings/global_game_settings.gd",
+	"res://scripts/settings/global_settings_store.gd",
 	"res://scripts/scenarios/core/battle_scenario.gd",
 	"res://scripts/scenarios/core/scenario_registry.gd",
+	"res://scripts/ui/ball_settings_dialog.gd",
 	"res://scripts/ui/battle_view.gd",
+	"res://scripts/ui/global_settings_dialog.gd",
 ]
 
 const FORBIDDEN_SHARED_STATE := [
@@ -33,9 +40,12 @@ func _init() -> void:
 	BallRegistry.reload()
 	_check(BallRegistry.is_valid(), "所有球模块均可加载并通过注册校验：%s" % ", ".join(BallRegistry.validation_errors()))
 	_check_core_has_no_ball_knowledge()
+	_check_per_ball_tuning_contract()
+	_check_global_settings_contract()
 	_check_ball_modules_do_not_reference_each_other()
 	_check_contact_damage_policy()
 	_check_no_global_progression_state()
+	_check_no_scenario_balance_multipliers()
 	_check_public_view_only_draws_generic_contracts()
 	_check_single_engine_entrypoint()
 	_check_floating_text_policy()
@@ -55,6 +65,41 @@ func _check_core_has_no_ball_knowledge() -> void:
 			_check(not source.contains('"%s"' % ball_id), "核心文件不得识别具体球 ID：%s -> %s" % [ball_id, path])
 		for field in FORBIDDEN_SHARED_STATE:
 			_check(not source.contains(field), "核心文件不得保存球种私有状态：%s -> %s" % [field, path])
+
+func _check_per_ball_tuning_contract() -> void:
+	var ball_ids := BallRegistry.ids()
+	for ball_id in ball_ids:
+		var module: BallModule = BallRegistry.get_module(ball_id)
+		var specs := module.setting_specs()
+		var defaults := module.default_settings_snapshot()
+		_check(is_equal_approx(float(defaults.get("max_hp", 0.0)), 100.0), "%s 本体默认生命值为 100" % ball_id)
+		_check(specs.keys().size() == defaults.keys().size(), "%s 的参数 Schema 与默认值一一对应" % ball_id)
+		for key in specs:
+			var spec: Dictionary = specs[key]
+			_check(spec.has("label") and spec.has("default"), "%s/%s 声明标签与默认值" % [ball_id, key])
+			_check(float(spec["max"]) >= float(spec["min"]), "%s/%s 参数范围有效" % [ball_id, key])
+	var target_id: String = ball_ids[0]
+	BallRegistry.configure_settings({target_id: {"max_hp": 137.0}})
+	for ball_id in ball_ids:
+		var expected_hp := 137.0 if ball_id == target_id else 100.0
+		_check(
+			is_equal_approx(BallRegistry.get_module(ball_id).max_hp, expected_hp),
+			"修改一个球的持久化参数不会改写其他球：%s" % ball_id
+		)
+	BallRegistry.configure_settings({})
+
+func _check_global_settings_contract() -> void:
+	var settings = GlobalGameSettingsScript.new()
+	_check(settings.settingi("battle_time_seconds") == 120, "全局默认对局时限为两分钟")
+	_check(settings.arena_size() == Vector2(640.0, 640.0), "全局默认竞技场为 640×640")
+	var specs: Dictionary = settings.setting_specs()
+	_check(specs.size() == 3, "全局 Schema 只包含时限与竞技场宽高")
+	_check(not specs.has("max_hp") and not specs.has("damage"), "全局设置不接管任何球属性")
+	var scenario_source := FileAccess.get_file_as_string("res://scripts/scenarios/core/battle_scenario.gd")
+	_check(not scenario_source.contains("max_battle_time"), "场景不能覆盖全局默认对局时限")
+	var main_source := FileAccess.get_file_as_string("res://scripts/main.gd")
+	_check(main_source.contains("GlobalSettingsStoreScript.load_settings"), "入口启动时加载全局持久化设置")
+	_check(not main_source.contains("time_limit_spin_box"), "入口不保留第二套单局时限输入")
 
 func _check_ball_modules_do_not_reference_each_other() -> void:
 	var dependency_pattern := RegEx.new()
@@ -93,6 +138,17 @@ func _check_no_global_progression_state() -> void:
 		for file_path in _gd_files_recursive(root):
 			var source := FileAccess.get_file_as_string(file_path)
 			_check(forbidden_pattern.search(source) == null, "公共玩法、场景和视图不得拥有全局阶段：%s" % file_path)
+
+func _check_no_scenario_balance_multipliers() -> void:
+	for file_path in _gd_files_recursive("res://scripts/scenarios"):
+		var source := FileAccess.get_file_as_string(file_path)
+		_check(not source.contains("damage_scale"), "场景不得为组合附加伤害平衡倍率：%s" % file_path)
+		_check(not source.contains("recovery_scale"), "场景不得为组合附加回复平衡倍率：%s" % file_path)
+	var simulation_source := FileAccess.get_file_as_string("res://scripts/simulation/battle_simulation.gd")
+	_check(simulation_source.contains("const DAMAGE_SCALE := 1.0"), "通用伤害结算使用恒等倍率")
+	_check(simulation_source.contains("const RECOVERY_SCALE := 1.0"), "通用回复结算使用恒等倍率")
+	_check(not simulation_source.contains("scenario.damage_scale"), "模拟器不从场景读取伤害倍率")
+	_check(not simulation_source.contains("scenario.recovery_scale"), "模拟器不从场景读取回复倍率")
 
 func _gd_files_recursive(path: String) -> PackedStringArray:
 	var files := PackedStringArray()

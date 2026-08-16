@@ -51,6 +51,7 @@ func step(battle, delta: float) -> void:
 		else:
 			battle.damage_entity(hit_entity, damage_amount, color, owner_side)
 		battle.spawn_particles(pos, color, 5, 100.0)
+		battle.emit_combat_event("projectile_hit", 0.48)
 		removed = true
 		return
 	pos = finish
