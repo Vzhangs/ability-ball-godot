@@ -4,7 +4,7 @@ func draw_underlay(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var scale_factor: float = context["scale_factor"]
 	var position: Vector2 = context["position"]
 	var shake_offset: Vector2 = context["shake_offset"]
-	canvas.draw_set_transform(position + shake_offset, fighter.aux_angle, Vector2.ONE * scale_factor)
+	canvas.draw_set_transform(position + shake_offset, ability.orbit_angle(), Vector2.ONE * scale_factor)
 	canvas.draw_line(Vector2(8.0, 0.0), Vector2(116.0, 0.0), Color("b8936c"), 9.0, true)
 	canvas.draw_line(Vector2(14.0, -2.0), Vector2(112.0, -2.0), Color(0.9, 0.78, 0.62, 0.65), 2.0, true)
 	canvas.draw_rect(Rect2(Vector2(94.0, -28.0), Vector2(52.0, 56.0)), Color("5e646b"))

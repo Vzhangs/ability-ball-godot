@@ -12,7 +12,6 @@ func _init() -> void:
 		"max_hp": 215.0,
 		"speed": 165.0,
 		"radius": 31.0,
-		"contact_damage": 11.0,
 		"cooldown": 1.15,
 		"ability": "旋转长锤 · 范围重击",
 		"sound_kind": "track",

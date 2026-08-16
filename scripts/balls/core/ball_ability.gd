@@ -6,6 +6,18 @@ var module: BallModule
 func configure(owner_module: BallModule) -> void:
 	module = owner_module
 
+func before_motion(_battle, _fighter, _opponent, _side: int, _delta: float) -> void:
+	pass
+
+func on_battle_started(_battle, _fighter, _opponent, _side: int) -> void:
+	pass
+
+func automatic_activation_enabled() -> bool:
+	return true
+
+func after_entities_step(_battle, _fighter, _opponent, _side: int, _delta: float) -> void:
+	pass
+
 func speed_multiplier(_battle, _fighter, _opponent, _side: int) -> float:
 	return 1.0
 
@@ -15,11 +27,11 @@ func on_step(_battle, _fighter, _opponent, _side: int, _delta: float) -> void:
 func activate(_battle, _fighter, _opponent, _side: int) -> void:
 	pass
 
-func cooldown_duration(battle, fighter) -> float:
-	return maxf(1.0, fighter.cooldown - float(battle.phase - 1) * 0.24)
+func cooldown_duration(_battle, fighter) -> float:
+	return fighter.cooldown
 
-func contact_damage(_battle, fighter, _opponent, base_damage: float) -> float:
-	return base_damage
+func contact_damage(_battle, _fighter, _opponent) -> float:
+	return 0.0
 
 func after_contact(_battle, _fighter, _opponent, _damage_dealt: float) -> void:
 	pass

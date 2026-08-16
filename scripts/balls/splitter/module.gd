@@ -12,9 +12,8 @@ func _init() -> void:
 		"max_hp": 210.0,
 		"speed": 192.0,
 		"radius": 27.0,
-		"contact_damage": 8.0,
 		"cooldown": 3.5,
-		"ability": "受击分裂 · 分身撞击",
+		"ability": "百体分裂 · 独立撞击",
 		"sound_kind": "impact",
 		"sort_order": 30,
 	}, AbilityScript, VisualScript)

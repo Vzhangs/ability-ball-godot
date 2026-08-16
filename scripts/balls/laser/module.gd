@@ -12,7 +12,6 @@ func _init() -> void:
 		"max_hp": 195.0,
 		"speed": 198.0,
 		"radius": 26.0,
-		"contact_damage": 9.0,
 		"cooldown": 4.0,
 		"ability": "锁定蓄力 · 穿透光束",
 		"sound_kind": "judgment",

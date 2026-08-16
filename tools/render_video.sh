@@ -7,9 +7,15 @@ ffmpeg_bin="${FFMPEG_BIN:-ffmpeg}"
 seed="${1:-20260815}"
 left_ball="${2:-vampire}"
 right_ball="${3:-six_king}"
+time_limit="${4:-120}"
 
 if [[ ! "$seed" =~ ^-?[0-9]+$ ]] || [[ "$seed" == "0" ]]; then
   echo "种子必须是非零整数。" >&2
+  exit 2
+fi
+
+if [[ ! "$time_limit" =~ ^[0-9]+$ ]] || (( time_limit < 15 || time_limit > 600 )); then
+  echo "对局时限必须是 15 到 600 秒之间的整数。" >&2
   exit 2
 fi
 
@@ -38,7 +44,8 @@ output_file="$project_dir/builds/${output_slug}.mp4"
   --render-video \
   "--seed=$seed" \
   "--left=$left_ball" \
-  "--right=$right_ball"
+  "--right=$right_ball" \
+  "--time-limit=$time_limit"
 
 "$ffmpeg_bin" -y -hide_banner \
   -i "$master_file" \

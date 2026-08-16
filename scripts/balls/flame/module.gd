@@ -12,7 +12,6 @@ func _init() -> void:
 		"max_hp": 195.0,
 		"speed": 208.0,
 		"radius": 27.0,
-		"contact_damage": 9.0,
 		"cooldown": 3.8,
 		"ability": "灼烧轨迹 · 烈焰爆发",
 		"sound_kind": "blood",

@@ -1,18 +1,19 @@
 extends Control
 
 const BattleViewScript := preload("res://scripts/ui/battle_view.gd")
-const RosterBattleViewScript := preload("res://scripts/ui/roster_battle_view.gd")
+const BattleSimulationScript := preload("res://scripts/simulation/battle_simulation.gd")
 const ProceduralAudioScript := preload("res://scripts/audio/procedural_audio.gd")
 
 var battle_view
 var seed_value := 20260815
+var time_limit_seconds: float = BattleSimulationScript.DEFAULT_BATTLE_TIME
 var current_left_id := "vampire"
 var current_right_id := "six_king"
 var speed_values := [1.0, 2.0, 4.0]
 var speed_index := 0
 
-var status_label: Label
 var seed_edit: LineEdit
+var time_limit_spin_box: SpinBox
 var pause_button: Button
 var speed_button: Button
 var result_label: Label
@@ -33,6 +34,7 @@ func _ready() -> void:
 	if not recording_mode and DisplayServer.get_name() != "headless":
 		DisplayServer.window_set_size(Vector2i(540, 960))
 	seed_value = _seed_from_arguments(seed_value)
+	time_limit_seconds = _time_limit_from_arguments(BattleSimulationScript.DEFAULT_BATTLE_TIME)
 	current_left_id = _ball_id_from_arguments("--left=", current_left_id)
 	current_right_id = _ball_id_from_arguments("--right=", current_right_id)
 	if not _startup_valid:
@@ -42,10 +44,9 @@ func _ready() -> void:
 	_build_background()
 	_build_header()
 	_build_battle_view()
-	_build_status()
+	_build_result_label()
 	_build_controls()
 	_build_footer()
-	_update_status(battle_view.simulation)
 
 func _build_background() -> void:
 	var background := ColorRect.new()
@@ -93,25 +94,15 @@ func _replace_battle_view() -> void:
 	if battle_view != null:
 		remove_child(battle_view)
 		battle_view.queue_free()
-	if _is_reference_match():
-		battle_view = BattleViewScript.new()
-	else:
-		battle_view = RosterBattleViewScript.new()
+	battle_view = BattleViewScript.new()
 	battle_view.position = Vector2(35.0, 190.0)
 	battle_view.size = Vector2(650.0, 650.0)
 	add_child(battle_view)
-	if _is_reference_match():
-		battle_view.start_battle(seed_value)
-	else:
-		battle_view.start_battle(seed_value, current_left_id, current_right_id)
+	battle_view.start_battle(seed_value, current_left_id, current_right_id, time_limit_seconds)
 	battle_view.set_simulation_speed(speed_values[speed_index])
-	battle_view.state_changed.connect(_update_status)
 	battle_view.battle_finished.connect(_on_battle_finished)
 	battle_view.combat_event.connect(_on_combat_event)
 	_update_title()
-
-func _is_reference_match() -> bool:
-	return current_left_id == "vampire" and current_right_id == "six_king"
 
 func _update_title() -> void:
 	if left_title_label == null or right_title_label == null:
@@ -121,18 +112,9 @@ func _update_title() -> void:
 	right_title_label.text = _module(current_right_id).display_name
 	right_title_label.add_theme_color_override("font_color", _module(current_right_id).title_color)
 
-func _build_status() -> void:
-	status_label = Label.new()
-	status_label.position = Vector2(35.0, 858.0)
-	status_label.size = Vector2(650.0, 82.0)
-	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	status_label.add_theme_font_size_override("font_size", 20)
-	status_label.add_theme_color_override("font_color", Color("d8dde2"))
-	add_child(status_label)
-
+func _build_result_label() -> void:
 	result_label = Label.new()
-	result_label.position = Vector2(35.0, 938.0)
+	result_label.position = Vector2(35.0, 858.0)
 	result_label.size = Vector2(650.0, 36.0)
 	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	result_label.add_theme_font_size_override("font_size", 17)
@@ -167,33 +149,44 @@ func _build_controls() -> void:
 	controls.position = Vector2(35.0, 1042.0)
 	controls.size = Vector2(650.0, 52.0)
 	controls.alignment = BoxContainer.ALIGNMENT_CENTER
-	controls.add_theme_constant_override("separation", 10)
+	controls.add_theme_constant_override("separation", 8)
 	add_child(controls)
 
-	pause_button = _make_button("暂停", Vector2(90.0, 46.0))
+	pause_button = _make_button("暂停", Vector2(70.0, 46.0))
 	pause_button.pressed.connect(_toggle_pause)
 	controls.add_child(pause_button)
 
-	speed_button = _make_button("速度 1×", Vector2(100.0, 46.0))
+	speed_button = _make_button("速度 1×", Vector2(86.0, 46.0))
 	speed_button.pressed.connect(_cycle_speed)
 	controls.add_child(speed_button)
 
-	var restart_button := _make_button("重开", Vector2(78.0, 46.0))
+	var restart_button := _make_button("重开", Vector2(66.0, 46.0))
 	restart_button.pressed.connect(_restart_same_seed)
 	controls.add_child(restart_button)
 
-	var random_button := _make_button("随机种子", Vector2(108.0, 46.0))
+	var random_button := _make_button("随机种子", Vector2(94.0, 46.0))
 	random_button.pressed.connect(_restart_random_seed)
 	controls.add_child(random_button)
 
 	seed_edit = LineEdit.new()
 	seed_edit.text = str(seed_value)
 	seed_edit.placeholder_text = "种子"
-	seed_edit.custom_minimum_size = Vector2(130.0, 46.0)
+	seed_edit.custom_minimum_size = Vector2(112.0, 46.0)
 	seed_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	seed_edit.add_theme_font_size_override("font_size", 17)
 	seed_edit.text_submitted.connect(_on_seed_submitted)
 	controls.add_child(seed_edit)
+
+	time_limit_spin_box = SpinBox.new()
+	time_limit_spin_box.min_value = 15.0
+	time_limit_spin_box.max_value = 600.0
+	time_limit_spin_box.step = 5.0
+	time_limit_spin_box.value = time_limit_seconds
+	time_limit_spin_box.suffix = " 秒"
+	time_limit_spin_box.tooltip_text = "对局时限（下次开局生效）"
+	time_limit_spin_box.custom_minimum_size = Vector2(104.0, 46.0)
+	time_limit_spin_box.value_changed.connect(_on_time_limit_changed)
+	controls.add_child(time_limit_spin_box)
 
 func _make_selector(selected_id: String) -> OptionButton:
 	var selector := OptionButton.new()
@@ -211,11 +204,11 @@ func _start_selected_match() -> void:
 	current_left_id = String(left_selector.get_item_metadata(left_selector.selected))
 	current_right_id = String(right_selector.get_item_metadata(right_selector.selected))
 	seed_value = _parse_seed(seed_edit.text, seed_value)
+	time_limit_seconds = time_limit_spin_box.value
 	_recording_quit_scheduled = false
 	result_label.text = ""
 	_replace_battle_view()
 	pause_button.text = "暂停"
-	_update_status(battle_view.simulation)
 
 func _make_button(text: String, minimum_size: Vector2) -> Button:
 	var button := Button.new()
@@ -243,28 +236,8 @@ func _build_footer() -> void:
 	brand.add_theme_color_override("font_color", Color("4e5962"))
 	add_child(brand)
 
-func _update_status(simulation) -> void:
-	if status_label == null or simulation == null:
-		return
-	if simulation is BattleSimulation:
-		status_label.text = "时间 %05.1fs　阶段 %d\n吸血鬼 %d / %d　　六王球 %d / %d" % [
-			simulation.elapsed, simulation.phase,
-			int(ceil(simulation.vampire.hp)), int(simulation.vampire.max_hp),
-			int(ceil(simulation.six_king.hp)), int(simulation.six_king.max_hp),
-		]
-	else:
-		status_label.text = "时间 %05.1fs　阶段 %d\n%s %d / %d　　%s %d / %d" % [
-			simulation.elapsed, simulation.phase,
-			simulation.left.display_name, int(ceil(simulation.left.hp)), int(simulation.left.max_hp),
-			simulation.right.display_name, int(ceil(simulation.right.hp)), int(simulation.right.max_hp),
-		]
-
 func _on_battle_finished(simulation) -> void:
-	var winner_name := ""
-	if simulation is BattleSimulation:
-		winner_name = simulation.vampire.display_name if simulation.winner_id == "vampire" else simulation.six_king.display_name
-	else:
-		winner_name = simulation.winner().display_name
+	var winner_name: String = simulation.winner().display_name
 	result_label.text = "%s获胜 · %s · 种子 %d" % [winner_name, simulation.finish_reason, simulation.seed_value]
 	if recording_mode and not _recording_quit_scheduled:
 		_recording_quit_scheduled = true
@@ -306,18 +279,19 @@ func _on_seed_submitted(value: String) -> void:
 	seed_value = _parse_seed(value, seed_value)
 	_start_seed(seed_value)
 
+func _on_time_limit_changed(value: float) -> void:
+	time_limit_seconds = value
+
 func _start_seed(value: int) -> void:
 	seed_value = value if value != 0 else 20260815
+	if time_limit_spin_box != null:
+		time_limit_seconds = time_limit_spin_box.value
 	_recording_quit_scheduled = false
 	seed_edit.text = str(seed_value)
 	result_label.text = ""
-	if _is_reference_match():
-		battle_view.start_battle(seed_value)
-	else:
-		battle_view.start_battle(seed_value, current_left_id, current_right_id)
+	battle_view.start_battle(seed_value, current_left_id, current_right_id, time_limit_seconds)
 	battle_view.set_paused(false)
 	pause_button.text = "暂停"
-	_update_status(battle_view.simulation)
 
 func _parse_seed(text: String, fallback: int) -> int:
 	if text.is_valid_int():
@@ -329,6 +303,14 @@ func _seed_from_arguments(fallback: int) -> int:
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--seed="):
 			return _parse_seed(argument.trim_prefix("--seed="), fallback)
+	return fallback
+
+func _time_limit_from_arguments(fallback: float) -> float:
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--time-limit="):
+			var value := argument.trim_prefix("--time-limit=")
+			if value.is_valid_float():
+				return clampf(value.to_float(), 15.0, 600.0)
 	return fallback
 
 func _ball_id_from_arguments(prefix: String, fallback: String) -> String:

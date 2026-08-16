@@ -1,565 +1,561 @@
 class_name BattleSimulation
 extends RefCounted
 
-## Deterministic, renderer-independent combat model for the vertical video scene.
+const BallBattleContextScript := preload("res://scripts/balls/core/ball_battle_context.gd")
+const ScenarioRegistryScript := preload("res://scripts/scenarios/core/scenario_registry.gd")
 
 const ARENA_SIZE := Vector2(640.0, 640.0)
-const MAX_BATTLE_TIME := 118.0
+const DEFAULT_BATTLE_TIME := 120.0
 const FIXED_STEP := 1.0 / 60.0
-
-const VAMPIRE_MAX_HP := 6675.0
-const SIX_KING_MAX_HP := 194.0
+const DAMAGE_SCALE := 0.5
+const RECOVERY_SCALE := 0.5
 
 class FighterState:
 	var id := ""
 	var display_name := ""
+	var color := Color.WHITE
+	var accent := Color.WHITE
 	var pos := Vector2.ZERO
 	var velocity := Vector2.ZERO
-	var radius := 28.0
+	var radius := 27.0
 	var hp := 100.0
 	var max_hp := 100.0
+	var base_speed := 180.0
+	var minimum_speed := 180.0
+	var maximum_speed := 180.0
+	var cooldown := 4.0
+	var ability_timer := 1.0
 	var rotation := 0.0
 	var hit_flash := 0.0
-	var shield_flash := 0.0
 	var trail: Array[Vector2] = []
+	var status_effects: Array[BallStatusEffect] = []
 
-	func _init(
-		fighter_id: String,
-		fighter_name: String,
-		spawn_position: Vector2,
-		spawn_velocity: Vector2,
-		spawn_radius: float,
-		spawn_hp: float
-	) -> void:
-		id = fighter_id
-		display_name = fighter_name
+	func _init(spec: Dictionary, spawn_position: Vector2, spawn_velocity: Vector2, timer_offset: float) -> void:
+		id = String(spec["id"])
+		display_name = String(spec["name"])
+		color = spec["color"] as Color
+		accent = spec["accent"] as Color
 		pos = spawn_position
 		velocity = spawn_velocity
-		radius = spawn_radius
-		hp = spawn_hp
-		max_hp = spawn_hp
+		radius = float(spec["radius"])
+		hp = float(spec["max_hp"])
+		max_hp = hp
+		base_speed = float(spec["speed"])
+		minimum_speed = float(spec.get("minimum_speed", base_speed))
+		maximum_speed = float(spec.get("maximum_speed", base_speed))
+		cooldown = float(spec["cooldown"])
+		ability_timer = cooldown * timer_offset
 
 	func hp_ratio() -> float:
 		return clampf(hp / max_hp, 0.0, 1.0)
 
 	func append_trail() -> void:
 		trail.push_front(pos)
-		if trail.size() > 18:
+		if trail.size() > 22:
 			trail.pop_back()
 
 var rng := RandomNumberGenerator.new()
+var visual_rng := RandomNumberGenerator.new()
 var seed_value := 20260815
+var left_id := ""
+var right_id := ""
 var elapsed := 0.0
 var finished := false
 var winner_id := ""
+var winner_side := ""
 var finish_reason := ""
-var phase := 1
 
-var vampire: FighterState
-var six_king: FighterState
+var left: FighterState
+var right: FighterState
+var left_module: BallModule
+var right_module: BallModule
+var left_ability: BallAbility
+var right_ability: BallAbility
+var battle_context
+var scenario
+var left_profile := "default"
+var right_profile := "default"
+var max_battle_time := DEFAULT_BATTLE_TIME
+var damage_scale := DAMAGE_SCALE
+var recovery_scale := RECOVERY_SCALE
+var contact_cooldown := 0.38
+var collision_impulse := 0.92
+var trail_interval := 0.055
 
-var anchors: Array[Dictionary] = []
-var track_structures: Array[Dictionary] = []
-var floating_texts: Array[Dictionary] = []
-var particles: Array[Dictionary] = []
-var checker_cells: Array[Dictionary] = []
 var impact_rings: Array[Dictionary] = []
+var particles: Array[Dictionary] = []
+var floating_texts: Array[Dictionary] = []
+var beams: Array[Dictionary] = []
+var entities: Array[BallEntity] = []
+var combat_events: Array[Dictionary] = []
 
-var carriage_angle := 0.0
-var carriage_position := Vector2.ZERO
-var checker_visible := 0.0
-var gold_flash := 0.0
 var camera_shake := 0.0
-
-var _anchor_timer := 0.6
-var _track_timer := 2.5
-var _checker_timer := 3.0
-var _blood_burst_timer := 5.4
-var _dash_timer := 2.6
 var _contact_timer := 0.0
-var _tether_damage_timer := 0.0
-var _track_damage_timer := 0.0
-var _carriage_damage_timer := 0.0
 var _trail_timer := 0.0
 
-var stats := {
-	"damage_to_vampire": 0.0,
-	"damage_to_six_king": 0.0,
-	"vampire_healing": 0.0,
-	"contact_hits": 0,
-	"anchors_spawned": 0,
-	"tracks_spawned": 0,
-	"checker_hits": 0,
-	"tether_hits": 0,
-	"track_hits": 0,
-	"blood_bursts": 0,
-	"phase_changes": 0,
-}
+var stats := {}
 
-func _init(initial_seed: int = 20260815) -> void:
-	reset(initial_seed)
+func _init(initial_seed: int, initial_left: String, initial_right: String, time_limit_seconds: float = -1.0) -> void:
+	reset(initial_seed, initial_left, initial_right, time_limit_seconds)
 
-func reset(new_seed: int = 20260815) -> void:
+func reset(new_seed: int, new_left: String, new_right: String, time_limit_seconds: float = -1.0) -> void:
+	assert(BallRegistry.is_valid(), "Ball registry is invalid: %s" % ", ".join(BallRegistry.validation_errors()))
+	assert(ScenarioRegistryScript.validation_errors().is_empty(), "Battle scenario registry is invalid: %s" % ", ".join(ScenarioRegistryScript.validation_errors()))
+	assert(BallRegistry.has_id(new_left), "Unknown left ball id: %s" % new_left)
+	assert(BallRegistry.has_id(new_right), "Unknown right ball id: %s" % new_right)
 	seed_value = new_seed if new_seed != 0 else 20260815
+	left_id = new_left
+	right_id = new_right
+	left_module = BallRegistry.get_module(left_id)
+	right_module = BallRegistry.get_module(right_id)
+	scenario = ScenarioRegistryScript.resolve(left_id, right_id)
+	left_profile = scenario.left_profile
+	right_profile = scenario.right_profile
+	assert(left_module.has_profile(left_profile), "%s does not provide scenario profile %s" % [left_id, left_profile])
+	assert(right_module.has_profile(right_profile), "%s does not provide scenario profile %s" % [right_id, right_profile])
+	left_ability = left_module.create_profile_ability(left_profile)
+	right_ability = right_module.create_profile_ability(right_profile)
+	battle_context = BallBattleContextScript.new(self)
+	max_battle_time = maxf(FIXED_STEP, time_limit_seconds if time_limit_seconds > 0.0 else scenario.max_battle_time)
+	damage_scale = scenario.damage_scale
+	recovery_scale = scenario.recovery_scale
+	contact_cooldown = scenario.contact_cooldown
+	collision_impulse = scenario.collision_impulse
+	trail_interval = scenario.trail_interval
 	rng.seed = seed_value
+	visual_rng.seed = seed_value ^ 0x5F3759DF
 	elapsed = 0.0
 	finished = false
 	winner_id = ""
+	winner_side = ""
 	finish_reason = ""
-	phase = 1
-
-	vampire = FighterState.new(
-		"vampire",
-		"吸血鬼",
-		Vector2(168.0, 310.0),
-		Vector2(188.0, 126.0),
-		31.0,
-		VAMPIRE_MAX_HP
+	left = FighterState.new(
+		left_module.fighter_spec(left_profile),
+		scenario.left_spawn_position,
+		scenario.left_spawn_velocity.rotated(rng.randf_range(-0.16, 0.16) if scenario.randomize_spawn_angle else 0.0),
+		scenario.left_timer_offset
 	)
-	six_king = FighterState.new(
-		"six_king",
-		"六王球",
-		Vector2(466.0, 326.0),
-		Vector2(-151.0, -174.0),
-		29.0,
-		SIX_KING_MAX_HP
+	right = FighterState.new(
+		right_module.fighter_spec(right_profile),
+		scenario.right_spawn_position,
+		scenario.right_spawn_velocity.rotated(rng.randf_range(-0.16, 0.16) if scenario.randomize_spawn_angle else 0.0),
+		scenario.right_timer_offset
 	)
-
-	anchors.clear()
-	track_structures.clear()
-	floating_texts.clear()
-	particles.clear()
-	checker_cells.clear()
 	impact_rings.clear()
-	carriage_angle = 0.0
-	carriage_position = six_king.pos
-	checker_visible = 0.0
-	gold_flash = 0.0
+	particles.clear()
+	floating_texts.clear()
+	beams.clear()
+	entities.clear()
+	combat_events.clear()
 	camera_shake = 0.0
-
-	_anchor_timer = 0.6
-	_track_timer = 2.5
-	_checker_timer = 3.0
-	_blood_burst_timer = 5.4
-	_dash_timer = 2.6
 	_contact_timer = 0.0
-	_tether_damage_timer = 0.0
-	_track_damage_timer = 0.0
-	_carriage_damage_timer = 0.0
 	_trail_timer = 0.0
-
+	var ability_counts := {}
+	for ball_id in BallRegistry.ids():
+		ability_counts[ball_id] = 0
 	stats = {
-		"damage_to_vampire": 0.0,
-		"damage_to_six_king": 0.0,
-		"vampire_healing": 0.0,
+		"damage_to_left": 0.0,
+		"damage_to_right": 0.0,
+		"healing": 0.0,
 		"contact_hits": 0,
-		"anchors_spawned": 0,
-		"tracks_spawned": 0,
-		"checker_hits": 0,
-		"tether_hits": 0,
-		"track_hits": 0,
-		"blood_bursts": 0,
-		"phase_changes": 0,
+		"projectiles_spawned": 0,
+		"abilities": ability_counts,
 	}
+	stats.merge(scenario.initial_stats(), true)
+	left_ability.on_battle_started(battle_context, left, right, 0)
+	right_ability.on_battle_started(battle_context, right, left, 1)
 
 func step(delta: float = FIXED_STEP) -> void:
 	delta = clampf(delta, 0.0, 0.05)
 	_update_transient_visuals(delta)
+	_update_entity_lifetimes(delta)
 	if finished:
 		return
-
 	elapsed += delta
-	_update_phase()
-	_update_cooldowns(delta)
-	_update_fighter_motion(vampire, delta, 155.0, 470.0)
-	_update_fighter_motion(six_king, delta, 138.0, 390.0)
-	_resolve_fighter_collision()
-	_update_vampire_abilities(delta)
-	_update_six_king_abilities(delta)
-	_update_tracks(delta)
-	_update_carriage(delta)
+	_update_fighter(left, right, left_ability, 0, delta)
+	_update_fighter(right, left, right_ability, 1, delta)
+	_resolve_collision()
+	_update_ability(left, right, left_ability, 0, delta)
+	_update_ability(right, left, right_ability, 1, delta)
+	_update_entities(delta)
+	left_ability.after_entities_step(battle_context, left, right, 0, delta)
+	right_ability.after_entities_step(battle_context, right, left, 1, delta)
 	_update_trails(delta)
+	_contact_timer = maxf(0.0, _contact_timer - delta)
+	camera_shake = maxf(0.0, camera_shake - delta * 16.0)
 	_check_finish()
 
-func _update_cooldowns(delta: float) -> void:
-	_anchor_timer -= delta
-	_track_timer -= delta
-	_checker_timer -= delta
-	_blood_burst_timer -= delta
-	_dash_timer -= delta
-	_contact_timer = maxf(0.0, _contact_timer - delta)
-	_tether_damage_timer = maxf(0.0, _tether_damage_timer - delta)
-	_track_damage_timer = maxf(0.0, _track_damage_timer - delta)
-	_carriage_damage_timer = maxf(0.0, _carriage_damage_timer - delta)
-	checker_visible = maxf(0.0, checker_visible - delta)
-	gold_flash = maxf(0.0, gold_flash - delta * 1.5)
-	camera_shake = maxf(0.0, camera_shake - delta * 18.0)
-	vampire.hit_flash = maxf(0.0, vampire.hit_flash - delta * 4.0)
-	six_king.hit_flash = maxf(0.0, six_king.hit_flash - delta * 4.0)
-	six_king.shield_flash = maxf(0.0, six_king.shield_flash - delta * 3.0)
+func _update_fighter(fighter: FighterState, opponent: FighterState, ability: BallAbility, side: int, delta: float) -> void:
+	ability.before_motion(battle_context, fighter, opponent, side, delta)
+	_update_status_effects(fighter, delta)
+	fighter.ability_timer -= delta
+	fighter.hit_flash = maxf(0.0, fighter.hit_flash - delta * 4.5)
 
-func _update_phase() -> void:
-	var new_phase := 1
-	if elapsed >= 37.0 or vampire.hp_ratio() <= 0.68:
-		new_phase = 2
-	if elapsed >= 74.0 or vampire.hp_ratio() <= 0.36:
-		new_phase = 3
-	if new_phase != phase:
-		phase = new_phase
-		stats["phase_changes"] += 1
-		gold_flash = 1.0
-		camera_shake = 8.0
-		spawn_floating_text("第 %d 阶段" % phase, six_king.pos + Vector2(0.0, -58.0), Color("ffe75a"), 1.5, 1.2)
-		spawn_ring(six_king.pos, Color("ffe75a"), 24.0, 170.0, 1.0)
-
-func _update_fighter_motion(fighter: FighterState, delta: float, minimum_speed: float, maximum_speed: float) -> void:
+	# 普通球没有互相追踪或吸引力：方向只来自初速度、墙面反弹、球体碰撞和显式技能。
+	var speed_multiplier := ability.speed_multiplier(battle_context, fighter, opponent, side)
+	var target_minimum_speed := fighter.minimum_speed * speed_multiplier
+	var target_maximum_speed := fighter.maximum_speed * speed_multiplier
+	if fighter.velocity.length_squared() <= 0.001:
+		fighter.velocity = Vector2.from_angle(rng.randf_range(0.0, TAU)) * target_minimum_speed
+	elif not _preserves_external_velocity(fighter):
+		var speed := fighter.velocity.length()
+		if speed < target_minimum_speed:
+			fighter.velocity = fighter.velocity.normalized() * target_minimum_speed
+		elif speed > target_maximum_speed:
+			fighter.velocity = fighter.velocity.normalized() * target_maximum_speed
+	else:
+		fighter.velocity = fighter.velocity.limit_length(maxf(target_maximum_speed * 2.4, target_maximum_speed))
 	fighter.pos += fighter.velocity * delta
-	fighter.rotation += fighter.velocity.length() * delta * 0.0024
+	fighter.rotation += fighter.velocity.length() * delta * 0.003
+	_resolve_wall(fighter)
 
-	if fighter.pos.x - fighter.radius < 0.0:
+func _resolve_wall(fighter: FighterState) -> void:
+	var bounced := false
+	if fighter.pos.x < fighter.radius:
 		fighter.pos.x = fighter.radius
 		fighter.velocity.x = absf(fighter.velocity.x)
-		_on_wall_bounce(fighter)
-	elif fighter.pos.x + fighter.radius > ARENA_SIZE.x:
+		bounced = true
+	elif fighter.pos.x > ARENA_SIZE.x - fighter.radius:
 		fighter.pos.x = ARENA_SIZE.x - fighter.radius
 		fighter.velocity.x = -absf(fighter.velocity.x)
-		_on_wall_bounce(fighter)
-	if fighter.pos.y - fighter.radius < 0.0:
+		bounced = true
+	if fighter.pos.y < fighter.radius:
 		fighter.pos.y = fighter.radius
 		fighter.velocity.y = absf(fighter.velocity.y)
-		_on_wall_bounce(fighter)
-	elif fighter.pos.y + fighter.radius > ARENA_SIZE.y:
+		bounced = true
+	elif fighter.pos.y > ARENA_SIZE.y - fighter.radius:
 		fighter.pos.y = ARENA_SIZE.y - fighter.radius
 		fighter.velocity.y = -absf(fighter.velocity.y)
-		_on_wall_bounce(fighter)
+		bounced = true
+	if bounced:
+		fighter.velocity = fighter.velocity.rotated(rng.randf_range(-0.035, 0.035))
+		spawn_particles(fighter.pos, fighter.accent, 3, 55.0)
+		for effect in fighter.status_effects.duplicate():
+			effect.on_wall_hit(battle_context, fighter)
 
-	var speed := fighter.velocity.length()
-	if speed < minimum_speed:
-		fighter.velocity = fighter.velocity.normalized() * minimum_speed if speed > 0.1 else Vector2.RIGHT * minimum_speed
-	elif speed > maximum_speed:
-		fighter.velocity = fighter.velocity.normalized() * maximum_speed
-
-func _on_wall_bounce(fighter: FighterState) -> void:
-	fighter.velocity = fighter.velocity.rotated(rng.randf_range(-0.045, 0.045))
-	spawn_particles(fighter.pos, Color("ffffff"), 3, 42.0)
-
-func _resolve_fighter_collision() -> void:
-	var delta_pos := six_king.pos - vampire.pos
-	var minimum_distance := vampire.radius + six_king.radius
+func _resolve_collision() -> void:
+	var delta_pos := right.pos - left.pos
+	var minimum_distance := left.radius + right.radius
 	var distance := delta_pos.length()
 	if distance >= minimum_distance or distance <= 0.001:
 		return
-
 	var normal := delta_pos / distance
 	var overlap := minimum_distance - distance
-	vampire.pos -= normal * overlap * 0.5
-	six_king.pos += normal * overlap * 0.5
-	var relative_speed := (six_king.velocity - vampire.velocity).dot(normal)
+	left.pos -= normal * overlap * 0.5
+	right.pos += normal * overlap * 0.5
+	var relative_speed := (right.velocity - left.velocity).dot(normal)
 	if relative_speed < 0.0:
-		var impulse := -(1.82) * relative_speed * 0.5
-		vampire.velocity -= normal * impulse
-		six_king.velocity += normal * impulse
-
-	if _contact_timer <= 0.0:
-		_contact_timer = 0.42
-		stats["contact_hits"] += 1
-		_damage(six_king, 5.0, vampire.pos, "-5", Color("ff4d55"))
-		_heal(vampire, 3.0, vampire.pos + Vector2(0.0, -34.0))
-		_damage(vampire, 18.0 + phase * 3.0, six_king.pos, "-%d" % int(18.0 + phase * 3.0), Color("ffe16a"))
-		camera_shake = maxf(camera_shake, 5.0)
-		spawn_ring((vampire.pos + six_king.pos) * 0.5, Color("ffffff"), 8.0, 72.0, 0.28)
-		spawn_particles((vampire.pos + six_king.pos) * 0.5, Color("fff3a6"), 9, 145.0)
-
-func _update_vampire_abilities(_delta: float) -> void:
-	if _dash_timer <= 0.0:
-		_dash_timer = maxf(2.25, 4.1 - phase * 0.25)
-		var direction := (six_king.pos - vampire.pos).normalized()
-		vampire.velocity = direction.rotated(rng.randf_range(-0.16, 0.16)) * (410.0 + phase * 18.0)
-		spawn_ring(vampire.pos, Color("d71933"), 18.0, 92.0, 0.35)
-		spawn_particles(vampire.pos, Color("ff304e"), 14, 180.0)
-
-	if _blood_burst_timer <= 0.0:
-		_blood_burst_timer = maxf(4.4, 6.4 - phase * 0.45)
-		stats["blood_bursts"] += 1
-		spawn_ring(vampire.pos, Color("b90028"), vampire.radius, 138.0, 0.7)
-		spawn_particles(vampire.pos, Color("d40f38"), 24, 225.0)
-		if vampire.pos.distance_to(six_king.pos) <= 142.0:
-			_damage(six_king, 2.0, six_king.pos, "-2", Color("ff4054"))
-			_heal(vampire, 9.0, vampire.pos + Vector2(0.0, -42.0))
-
-func _update_six_king_abilities(_delta: float) -> void:
-	var desired_anchor_count := 8 + phase * 7
-	if _anchor_timer <= 0.0 and anchors.size() < desired_anchor_count:
-		_anchor_timer = maxf(0.7, 1.55 - phase * 0.22)
-		_spawn_anchor()
-
-	if _checker_timer <= 0.0:
-		_checker_timer = maxf(3.5, 5.8 - phase * 0.55)
-		_activate_checkerboard()
-
-	if _track_timer <= 0.0:
-		_track_timer = maxf(4.6, 8.2 - phase * 1.0)
-		_spawn_track_structure()
-
-	if anchors.is_empty():
+		var impulse := -relative_speed * collision_impulse
+		left.velocity -= normal * impulse
+		right.velocity += normal * impulse
+	if _contact_timer > 0.0:
 		return
-	if _tether_damage_timer <= 0.0:
-		_tether_damage_timer = 0.20
-		var crossings := 0
-		for anchor in anchors:
-			var distance := _distance_to_segment(vampire.pos, six_king.pos, anchor["pos"])
-			if distance <= vampire.radius * 0.72:
-				crossings += 1
-		if crossings > 0:
-			var tether_damage := minf(26.0, 2.4 + crossings * (1.6 + phase * 0.55))
-			_damage(vampire, tether_damage, vampire.pos, "-%d" % int(ceil(tether_damage)), Color("7be8ff"), false)
-			stats["tether_hits"] += 1
-			spawn_particles(vampire.pos, Color("8defff"), mini(8, crossings + 2), 95.0)
+	_contact_timer = contact_cooldown
+	stats["contact_hits"] = int(stats["contact_hits"]) + 1
+	var left_contact_damage := maxf(0.0, left_ability.contact_damage(battle_context, left, right))
+	var right_contact_damage := maxf(0.0, right_ability.contact_damage(battle_context, right, left))
+	var left_damage_dealt := damage(right, left_contact_damage, left.accent, left) if left_contact_damage > 0.0 else 0.0
+	var right_damage_dealt := damage(left, right_contact_damage, right.accent, right) if right_contact_damage > 0.0 else 0.0
+	left_ability.after_contact(battle_context, left, right, left_damage_dealt)
+	right_ability.after_contact(battle_context, right, left, right_damage_dealt)
+	var impact := (left.pos + right.pos) * 0.5
+	spawn_ring(impact, Color.WHITE, 8.0, 74.0, 0.3)
+	spawn_particles(impact, Color("fff0a0"), 10, 150.0)
+	camera_shake = maxf(camera_shake, 5.0)
 
-func _spawn_anchor() -> void:
-	var index := anchors.size()
-	var side := index % 4
-	var slot := index / 4
-	var spread := 72.0 + float(slot % 7) * 82.0
-	var position := Vector2.ZERO
-	var inward := Vector2.ZERO
-	match side:
-		0:
-			position = Vector2(clampf(spread, 22.0, 618.0), 7.0)
-			inward = Vector2.DOWN
-		1:
-			position = Vector2(633.0, clampf(spread, 22.0, 618.0))
-			inward = Vector2.LEFT
-		2:
-			position = Vector2(clampf(ARENA_SIZE.x - spread, 22.0, 618.0), 633.0)
-			inward = Vector2.UP
-		_:
-			position = Vector2(7.0, clampf(ARENA_SIZE.y - spread, 22.0, 618.0))
-			inward = Vector2.RIGHT
-	anchors.append({"pos": position, "inward": inward, "pulse": 1.0, "index": index})
-	stats["anchors_spawned"] += 1
-	spawn_ring(position, Color("22ff4d"), 3.0, 38.0, 0.45)
+func _update_ability(fighter: FighterState, opponent: FighterState, ability: BallAbility, side: int, delta: float) -> void:
+	ability.on_step(battle_context, fighter, opponent, side, delta)
+	if not ability.automatic_activation_enabled():
+		return
+	if fighter.ability_timer > 0.0:
+		return
+	ability.activate(battle_context, fighter, opponent, side)
+	fighter.ability_timer = ability.cooldown_duration(battle_context, fighter)
+	_record_ability(fighter.id)
 
-func _activate_checkerboard() -> void:
-	checker_visible = 1.35
-	checker_cells.clear()
-	var grid_count := 6
-	var cell_size := ARENA_SIZE.x / float(grid_count)
-	for y in range(grid_count):
-		for x in range(grid_count):
-			var active := ((x + y + phase + int(elapsed)) % 3 == 0) or rng.randf() < 0.14
-			var value := rng.randi_range(1, 30)
-			checker_cells.append({
-				"rect": Rect2(Vector2(x, y) * cell_size, Vector2.ONE * cell_size),
-				"active": active,
-				"value": value,
-			})
-	var cell_x := clampi(int(vampire.pos.x / cell_size), 0, grid_count - 1)
-	var cell_y := clampi(int(vampire.pos.y / cell_size), 0, grid_count - 1)
-	var current: Dictionary = checker_cells[cell_y * grid_count + cell_x]
-	if current["active"]:
-		var damage := 24.0 + float(current["value"]) * 0.75 + phase * 7.0
-		_damage(vampire, damage, vampire.pos, "-%d" % int(damage), Color("fff06a"))
-		stats["checker_hits"] += 1
-		gold_flash = 0.65
+func damage(target: FighterState, amount: float, color: Color, source: FighterState, show_text: bool = true) -> float:
+	for effect in target.status_effects:
+		if effect.blocks_damage(battle_context, target, amount, source):
+			effect.on_damage_blocked(battle_context, target, source, show_text)
+			return 0.0
+	var applied := minf(target.hp, maxf(0.0, amount) * damage_scale)
+	target.hp = maxf(0.0, target.hp - applied)
+	target.hit_flash = 1.0
+	if target == left:
+		stats["damage_to_left"] = float(stats["damage_to_left"]) + applied
+	else:
+		stats["damage_to_right"] = float(stats["damage_to_right"]) + applied
+	if show_text and applied > 0.0:
+		spawn_text("-%d" % int(ceil(applied)), target.pos + Vector2(0.0, -target.radius - 6.0), color, 0.6)
+	if source != null and applied > 0.0:
+		var source_ability: BallAbility = _ability_for_fighter(source)
+		if source_ability != null:
+			source_ability.after_damage_dealt(battle_context, source, target, applied)
+	return applied
 
-func _spawn_track_structure() -> void:
-	var arms := 2 + phase
-	var lifetime := 10.0 + phase * 2.0
-	track_structures.append({
-		"angle": rng.randf_range(0.0, TAU),
-		"arms": arms,
-		"length": 250.0 + phase * 45.0,
-		"age": 0.0,
-		"lifetime": lifetime,
-		"angular_speed": rng.randf_range(0.18, 0.34) * (-1.0 if rng.randf() < 0.5 else 1.0),
-		"width": 19.0 + phase * 2.0,
-	})
-	stats["tracks_spawned"] += 1
-	spawn_ring(six_king.pos, Color("c9a978"), 26.0, 110.0, 0.55)
+func damage_entity(
+	target: BallEntity,
+	amount: float,
+	color: Color,
+	source_side: int,
+	show_text: bool = true
+) -> float:
+	if target == null or not target.can_receive_attack(source_side):
+		return 0.0
+	var applied := target.receive_attack(
+		battle_context,
+		maxf(0.0, amount) * damage_scale,
+		source_side,
+		color
+	)
+	if applied <= 0.0:
+		return 0.0
+	if show_text:
+		spawn_text("-%d" % int(ceil(applied)), target.pos + Vector2(0.0, -target.radius - 6.0), color, 0.6)
+	var source := fighter_for_side(source_side)
+	var source_ability: BallAbility = _ability_for_fighter(source)
+	if source_ability != null:
+		source_ability.after_damage_dealt(battle_context, source, null, applied)
+	return applied
 
-func _update_tracks(delta: float) -> void:
-	var remove_indices: Array[int] = []
-	var touching_track := false
-	for index in range(track_structures.size()):
-		var track: Dictionary = track_structures[index]
-		track["age"] = float(track["age"]) + delta
-		track["angle"] = float(track["angle"]) + float(track["angular_speed"]) * delta
-		track_structures[index] = track
-		if float(track["age"]) >= float(track["lifetime"]):
-			remove_indices.push_front(index)
-			continue
-		var arms: int = track["arms"]
-		for arm in range(arms):
-			var angle: float = float(track["angle"]) + TAU * float(arm) / float(arms)
-			var endpoint := six_king.pos + Vector2.from_angle(angle) * float(track["length"])
-			if _distance_to_segment(vampire.pos, six_king.pos, endpoint) <= vampire.radius + float(track["width"]) * 0.5:
-				touching_track = true
-	for index in remove_indices:
-		track_structures.remove_at(index)
-	if touching_track and _track_damage_timer <= 0.0:
-		_track_damage_timer = 0.16
-		var damage := 7.0 + phase * 3.5
-		_damage(vampire, damage, vampire.pos, "-%d" % int(damage), Color("e5bd83"), false)
-		stats["track_hits"] += 1
-		vampire.velocity += (vampire.pos - six_king.pos).normalized() * 28.0
+func contact_damage_for_side(source_side: int, target) -> float:
+	var source := fighter_for_side(source_side)
+	var source_ability: BallAbility = _ability_for_fighter(source)
+	if source_ability == null:
+		return 0.0
+	return maxf(0.0, source_ability.contact_damage(battle_context, source, target))
 
-func _update_carriage(delta: float) -> void:
-	carriage_angle += delta * (1.25 + phase * 0.15)
-	var orbit_radius := 82.0 + phase * 11.0
-	carriage_position = six_king.pos + Vector2.from_angle(carriage_angle) * orbit_radius
-	if carriage_position.distance_to(vampire.pos) <= vampire.radius + 31.0 and _carriage_damage_timer <= 0.0:
-		_carriage_damage_timer = 0.65
-		var damage := 25.0 + phase * 8.0
-		_damage(vampire, damage, carriage_position, "-%d" % int(damage), Color("f4f4f4"))
-		vampire.velocity += (vampire.pos - carriage_position).normalized() * 110.0
-		camera_shake = 7.0
+func heal(fighter: FighterState, amount: float) -> float:
+	var applied := minf(amount * recovery_scale, fighter.max_hp - fighter.hp)
+	if applied <= 0.0:
+		return 0.0
+	fighter.hp += applied
+	stats["healing"] = float(stats["healing"]) + applied
+	spawn_text("+%d" % int(ceil(applied)), fighter.pos + Vector2(0.0, -fighter.radius - 10.0), Color("60ff87"), 0.65)
+	return applied
+
+func _ability_for_fighter(fighter: FighterState) -> BallAbility:
+	if fighter == left:
+		return left_ability
+	if fighter == right:
+		return right_ability
+	return null
+
+func _update_status_effects(fighter: FighterState, delta: float) -> void:
+	for index in range(fighter.status_effects.size() - 1, -1, -1):
+		var effect := fighter.status_effects[index]
+		effect.tick(battle_context, fighter, delta)
+		if effect.is_expired():
+			fighter.status_effects.remove_at(index)
+
+func _preserves_external_velocity(fighter: FighterState) -> bool:
+	for effect in fighter.status_effects:
+		if effect.preserves_external_velocity():
+			return true
+	return false
 
 func _update_trails(delta: float) -> void:
 	_trail_timer -= delta
 	if _trail_timer > 0.0:
 		return
-	_trail_timer = 0.045
-	vampire.append_trail()
-	six_king.append_trail()
-
-func _damage(
-	target: FighterState,
-	amount: float,
-	world_position: Vector2,
-	label_text: String,
-	color: Color,
-	show_text: bool = true
-) -> void:
-	if finished or amount <= 0.0:
-		return
-	var actual := minf(amount, target.hp)
-	target.hp = maxf(0.0, target.hp - amount)
-	target.hit_flash = 1.0
-	if target.id == "vampire":
-		stats["damage_to_vampire"] += actual
-	else:
-		stats["damage_to_six_king"] += actual
-		target.shield_flash = 1.0
-	if show_text:
-		spawn_floating_text(label_text, world_position + Vector2(rng.randf_range(-10.0, 10.0), -26.0), color, 0.72, 0.82)
-
-func _heal(target: FighterState, amount: float, world_position: Vector2) -> void:
-	if finished or amount <= 0.0:
-		return
-	var before := target.hp
-	target.hp = minf(target.max_hp, target.hp + amount)
-	var actual := target.hp - before
-	if actual <= 0.0:
-		return
-	stats["vampire_healing"] += actual
-	spawn_floating_text("+%d" % int(round(actual)), world_position, Color("26ef72"), 0.78, 0.9)
-
-func _check_finish() -> void:
-	if vampire.hp <= 0.0:
-		_finish("six_king", "击败")
-	elif six_king.hp <= 0.0:
-		_finish("vampire", "击败")
-	elif elapsed >= MAX_BATTLE_TIME:
-		var vampire_ratio := vampire.hp_ratio()
-		var king_ratio := six_king.hp_ratio()
-		_finish("vampire" if vampire_ratio > king_ratio else "six_king", "时间裁定")
-
-func _finish(new_winner_id: String, reason: String) -> void:
-	finished = true
-	winner_id = new_winner_id
-	finish_reason = reason
-	var winner := vampire if winner_id == "vampire" else six_king
-	spawn_ring(winner.pos, Color("ffe75a"), winner.radius, 260.0, 1.8)
-	spawn_particles(winner.pos, Color("ffe75a"), 50, 310.0)
-	camera_shake = 12.0
+	_trail_timer = trail_interval
+	left.append_trail()
+	right.append_trail()
 
 func _update_transient_visuals(delta: float) -> void:
-	for anchor in anchors:
-		anchor["pulse"] = maxf(0.0, float(anchor["pulse"]) - delta * 2.4)
-
-	var text_remove: Array[int] = []
-	for index in range(floating_texts.size()):
-		var item: Dictionary = floating_texts[index]
-		item["ttl"] = float(item["ttl"]) - delta
-		item["pos"] = Vector2(item["pos"]) + Vector2(0.0, -34.0 * delta)
-		floating_texts[index] = item
-		if float(item["ttl"]) <= 0.0:
-			text_remove.push_front(index)
-	for index in text_remove:
-		floating_texts.remove_at(index)
-
-	var particle_remove: Array[int] = []
-	for index in range(particles.size()):
-		var particle: Dictionary = particles[index]
+	for index in range(impact_rings.size() - 1, -1, -1):
+		var ring := impact_rings[index]
+		ring["ttl"] = float(ring["ttl"]) - delta
+		ring["radius"] = lerpf(float(ring["start_radius"]), float(ring["end_radius"]), 1.0 - float(ring["ttl"]) / float(ring["duration"]))
+		if float(ring["ttl"]) <= 0.0:
+			impact_rings.remove_at(index)
+		else:
+			impact_rings[index] = ring
+	for index in range(particles.size() - 1, -1, -1):
+		var particle := particles[index]
 		particle["ttl"] = float(particle["ttl"]) - delta
 		particle["pos"] = Vector2(particle["pos"]) + Vector2(particle["velocity"]) * delta
-		particle["velocity"] = Vector2(particle["velocity"]) * maxf(0.0, 1.0 - delta * 2.2)
-		particles[index] = particle
+		particle["velocity"] = Vector2(particle["velocity"]) * pow(0.05, delta)
 		if float(particle["ttl"]) <= 0.0:
-			particle_remove.push_front(index)
-	for index in particle_remove:
-		particles.remove_at(index)
+			particles.remove_at(index)
+		else:
+			particles[index] = particle
+	for index in range(floating_texts.size() - 1, -1, -1):
+		var item := floating_texts[index]
+		item["ttl"] = float(item["ttl"]) - delta
+		item["pos"] = Vector2(item["pos"]) + Vector2(0.0, -28.0) * delta
+		if float(item["ttl"]) <= 0.0:
+			floating_texts.remove_at(index)
+		else:
+			floating_texts[index] = item
+	_update_ttl_array(beams, delta)
 
-	var ring_remove: Array[int] = []
-	for index in range(impact_rings.size()):
-		var ring: Dictionary = impact_rings[index]
-		ring["ttl"] = float(ring["ttl"]) - delta
-		var progress: float = 1.0 - float(ring["ttl"]) / float(ring["duration"])
-		ring["radius"] = lerpf(float(ring["start_radius"]), float(ring["end_radius"]), clampf(progress, 0.0, 1.0))
-		impact_rings[index] = ring
-		if float(ring["ttl"]) <= 0.0:
-			ring_remove.push_front(index)
-	for index in ring_remove:
-		impact_rings.remove_at(index)
+func _update_ttl_array(items: Array[Dictionary], delta: float) -> void:
+	for index in range(items.size() - 1, -1, -1):
+		items[index]["ttl"] = float(items[index]["ttl"]) - delta
+		if float(items[index]["ttl"]) <= 0.0:
+				items.remove_at(index)
 
-func spawn_floating_text(text: String, position: Vector2, color: Color, ttl: float = 0.8, scale: float = 1.0) -> void:
-	floating_texts.append({"text": text, "pos": position, "color": color, "ttl": ttl, "duration": ttl, "scale": scale})
+func _update_entity_lifetimes(delta: float) -> void:
+	for entity in entities:
+		entity.process_lifetime(delta)
+	_remove_finished_entities()
 
-func spawn_particles(position: Vector2, color: Color, count: int, speed: float) -> void:
-	for _index in range(count):
-		var velocity := Vector2.from_angle(rng.randf_range(0.0, TAU)) * rng.randf_range(speed * 0.35, speed)
-		var ttl := rng.randf_range(0.22, 0.62)
-		particles.append({
-			"pos": position,
-			"velocity": velocity,
-			"color": color,
-			"ttl": ttl,
-			"duration": ttl,
-			"size": rng.randf_range(2.0, 5.5),
-		})
+func _update_entities(delta: float) -> void:
+	for entity in entities.duplicate():
+		if not entity.removed:
+			entity.process_step(battle_context, delta)
+	_remove_finished_entities()
+
+func _remove_finished_entities() -> void:
+	for index in range(entities.size() - 1, -1, -1):
+		if entities[index].removed:
+			entities.remove_at(index)
 
 func spawn_ring(position: Vector2, color: Color, start_radius: float, end_radius: float, duration: float) -> void:
 	impact_rings.append({
-		"pos": position,
-		"color": color,
-		"start_radius": start_radius,
-		"end_radius": end_radius,
-		"radius": start_radius,
-		"ttl": duration,
-		"duration": duration,
+		"pos": position, "color": color, "start_radius": start_radius, "end_radius": end_radius,
+		"radius": start_radius, "duration": duration, "ttl": duration,
 	})
 
-func _distance_to_segment(point: Vector2, start: Vector2, end: Vector2) -> float:
-	var segment := end - start
-	var length_squared := segment.length_squared()
-	if length_squared <= 0.0001:
-		return point.distance_to(start)
-	var t := clampf((point - start).dot(segment) / length_squared, 0.0, 1.0)
-	return point.distance_to(start + segment * t)
+func spawn_particles(position: Vector2, color: Color, count: int, speed: float) -> void:
+	for _index in range(count):
+		var direction := Vector2.from_angle(visual_rng.randf_range(0.0, TAU))
+		var duration := visual_rng.randf_range(0.25, 0.62)
+		particles.append({
+			"pos": position, "velocity": direction * visual_rng.randf_range(speed * 0.35, speed),
+			"color": color, "size": visual_rng.randf_range(2.0, 5.0), "duration": duration, "ttl": duration,
+		})
+
+func spawn_text(text: String, position: Vector2, color: Color, duration: float) -> void:
+	floating_texts.append({"text": text, "pos": position, "color": color, "duration": duration, "ttl": duration})
+
+func add_beam(from: Vector2, to: Vector2, color: Color, duration: float, width: float) -> void:
+	beams.append({"from": from, "to": to, "color": color, "ttl": duration, "duration": duration, "width": width})
+
+func add_projectile(owner_side: int, position: Vector2, velocity: Vector2, radius: float, projectile_damage: float, color: Color, duration: float, type: String) -> void:
+	add_entity(BallProjectileEntity.new(owner_side, position, velocity, radius, projectile_damage, color, duration, type))
+	record_stat("projectiles_spawned")
+
+func add_entity(entity: BallEntity) -> BallEntity:
+	assert(entity != null, "Cannot add a null battle entity")
+	entities.append(entity)
+	return entity
+
+func entity_list(owner_side: int = -1, tag: String = "") -> Array[BallEntity]:
+	var result: Array[BallEntity] = []
+	for entity in entities:
+		if entity.removed or entity.is_captured():
+			continue
+		if owner_side >= 0 and entity.owner_side != owner_side:
+			continue
+		if not tag.is_empty() and not entity.has_tag(tag):
+			continue
+		result.append(entity)
+	return result
+
+func count_entities(owner_side: int, tag: String) -> int:
+	return entity_list(owner_side, tag).size()
+
+func apply_status(target: FighterState, effect: BallStatusEffect) -> BallStatusEffect:
+	assert(effect != null and not effect.key.is_empty(), "Status effects require a stable key")
+	for existing in target.status_effects:
+		if existing.key == effect.key:
+			existing.refresh_from(effect)
+			return existing
+	target.status_effects.append(effect)
+	return effect
+
+func has_status(target: FighterState, key_prefix: String) -> bool:
+	for effect in target.status_effects:
+		if effect.key.begins_with(key_prefix) and not effect.is_expired():
+			return true
+	return false
+
+func arena_size() -> Vector2:
+	return ARENA_SIZE
+
+func fighter_for_side(side: int) -> FighterState:
+	return left if side == 0 else right
+
+func opponent_for_side(side: int) -> FighterState:
+	return right if side == 0 else left
+
+func side_for_fighter(fighter: FighterState) -> int:
+	return 0 if fighter == left else 1
+
+func emit_combat_event(kind: String, strength: float) -> void:
+	combat_events.append({"kind": kind, "strength": clampf(strength, 0.0, 1.0)})
+
+func take_combat_events() -> Array[Dictionary]:
+	var result := combat_events.duplicate(true)
+	combat_events.clear()
+	return result
+
+func record_stat(key: String, amount: int = 1) -> void:
+	stats[key] = int(stats.get(key, 0)) + amount
+
+func _record_ability(ball_id: String) -> void:
+	var abilities: Dictionary = stats["abilities"]
+	abilities[ball_id] = int(abilities[ball_id]) + 1
+	stats["abilities"] = abilities
+
+func ray_to_arena_edge(origin: Vector2, direction: Vector2) -> Vector2:
+	var distances: Array[float] = []
+	if direction.x > 0.001:
+		distances.append((ARENA_SIZE.x - origin.x) / direction.x)
+	elif direction.x < -0.001:
+		distances.append((0.0 - origin.x) / direction.x)
+	if direction.y > 0.001:
+		distances.append((ARENA_SIZE.y - origin.y) / direction.y)
+	elif direction.y < -0.001:
+		distances.append((0.0 - origin.y) / direction.y)
+	var minimum := 1000.0
+	for value in distances:
+		if value > 0.0:
+			minimum = minf(minimum, value)
+	return origin + direction * minimum
+
+func _check_finish() -> void:
+	if left.hp <= 0.0 or right.hp <= 0.0:
+		if left.hp <= 0.0 and right.hp <= 0.0:
+			_set_winner("left", "同归于尽·先手判定")
+		elif right.hp <= 0.0:
+			_set_winner("left", "击败")
+		else:
+			_set_winner("right", "击败")
+	elif elapsed >= max_battle_time:
+		if left.hp_ratio() >= right.hp_ratio():
+			_set_winner("left", "时限判定")
+		else:
+			_set_winner("right", "时限判定")
+
+func _set_winner(side: String, reason: String) -> void:
+	finished = true
+	winner_side = side
+	winner_id = left.id if side == "left" else right.id
+	finish_reason = reason
+	var winner := left if side == "left" else right
+	spawn_ring(winner.pos, Color("ffe35c"), winner.radius, 260.0, 1.2)
+
+func winner() -> FighterState:
+	return left if winner_side == "left" else right
 
 func snapshot() -> Dictionary:
 	return {
-		"seed": seed_value,
-		"elapsed_ms": int(round(elapsed * 1000.0)),
-		"phase": phase,
+		"elapsed": elapsed,
 		"finished": finished,
 		"winner_id": winner_id,
-		"vampire_hp": snappedf(vampire.hp, 0.001),
-		"six_king_hp": snappedf(six_king.hp, 0.001),
-		"vampire_pos": Vector2(snappedf(vampire.pos.x, 0.001), snappedf(vampire.pos.y, 0.001)),
-		"six_king_pos": Vector2(snappedf(six_king.pos.x, 0.001), snappedf(six_king.pos.y, 0.001)),
-		"anchors": anchors.size(),
-		"tracks": track_structures.size(),
+		"winner_side": winner_side,
+		"scenario_id": scenario.id,
+		"left_hp": left.hp,
+		"right_hp": right.hp,
+		"left_pos": left.pos,
+		"right_pos": right.pos,
+		"left_velocity": left.velocity,
+		"right_velocity": right.velocity,
+		"left_clones": count_entities(0, "clone"),
+		"right_clones": count_entities(1, "clone"),
+		"projectiles": entity_list(-1, "projectile").size(),
 		"stats": stats.duplicate(true),
 	}
