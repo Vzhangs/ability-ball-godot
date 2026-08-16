@@ -110,7 +110,9 @@ func _check_health_hud_policy() -> void:
 	_check(render_source.contains("crop=1080:1200:0:0"), "视频从原生母版裁取 1080×1200 标题与完整战斗视图")
 	_check(not render_source.contains("scale=1080:1200"), "录制链路不再把低分辨率画面放大成 1080×1200")
 	_check(render_source.contains('--fixed-fps "$recording_fps"'), "视频生成脚本使用用户选择的录制帧率")
-	_check(render_source.contains("select='eq(n,${cover_frame})'"), "自动封面从开局后半秒选取一帧")
+	_check(render_source.contains("cover_frame=$(( recording_fps * 6 ))"), "自动封面固定取对局第 6 秒画面")
+	_check(render_source.contains("colorkey=0x030405"), "封面标题抠除背景后作为透明前景覆盖内容区")
+	_check(render_source.contains("overlay=0:${cover_title_y}"), "封面对决标题叠放在竞技场内容区中央")
 	_check(render_source.contains("overlay=enable='eq(n,0)'"), "自动封面只替换最终视频第 1 帧")
 
 func _check_settings_dialog() -> void:

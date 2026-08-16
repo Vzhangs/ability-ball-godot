@@ -39,7 +39,8 @@ if [[ "$left_ball" != "vampire" ]] || [[ "$right_ball" != "six_king" ]]; then
 fi
 master_file="$project_dir/builds/${output_slug}-master.avi"
 output_file="$project_dir/builds/${output_slug}.mp4"
-cover_frame=$(( recording_fps / 2 ))
+cover_frame=$(( recording_fps * 6 ))
+cover_title_y=605
 
 "$godot_bin" \
   --path "$project_dir" \
@@ -57,7 +58,7 @@ cover_frame=$(( recording_fps / 2 ))
 
 "$ffmpeg_bin" -y -hide_banner \
   -i "$master_file" \
-  -filter_complex "[0:v]crop=1080:1200:0:0,split=3[normal][cover_base_source][cover_title_source];[cover_base_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,crop=1080:1094:0:106,pad=1080:1200:0:0:color=black[cover_base];[cover_title_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,crop=1080:110:0:0[cover_title];[cover_base][cover_title]overlay=0:120[cover];[normal][cover]overlay=enable='eq(n,0)':eof_action=pass[video]" \
+  -filter_complex "[0:v]crop=1080:1200:0:0,split=3[normal][cover_base_source][cover_title_source];[cover_base_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,drawbox=x=0:y=0:w=1080:h=120:color=0x030405:t=fill[cover_base];[cover_title_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,crop=1080:120:0:0,format=rgba,colorkey=0x030405:0.12:0.08[cover_title];[cover_base][cover_title]overlay=0:${cover_title_y}:format=auto[cover];[normal][cover]overlay=enable='eq(n,0)':eof_action=pass[video]" \
   -map "[video]" -map '0:a?' \
   -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p \
   -c:a aac -b:a 192k \
