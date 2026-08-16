@@ -302,7 +302,7 @@ func _check_circular_ring(
 
 func _check_splitter_clone_bodies() -> void:
 	var module: BallModule = BallRegistry.get_module("splitter")
-	_check(module.settingi("max_clones") == 100, "分裂球数量上限默认配置为 100")
+	_check(module.settingi("max_clones") == 100, "分身球数量上限默认配置为 100")
 	var cap_simulation := BattleSimulationScript.new(20260831, "splitter", "laser")
 	for _activation in range(40):
 		cap_simulation.left_ability.activate(
@@ -327,11 +327,11 @@ func _check_splitter_clone_bodies() -> void:
 	var split_events := simulation.take_combat_events()
 	_check(_count_combat_events(split_events, "split") == 1, "一次分裂只触发一次分裂音效")
 	var clones: Array[BallEntity] = simulation.entity_list(0, "splitter_clone")
-	_check(clones.size() == 2, "分裂球首次激活生成两个独立小球")
+	_check(clones.size() == 2, "分身球首次激活生成两个独立小球")
 	_check(is_equal_approx(
 		simulation.left_ability.contact_damage(simulation.battle_context, simulation.left, simulation.right),
 		5.0
-	), "分裂球本体撞击伤害固定为 5")
+	), "分身球本体撞击伤害固定为 5")
 	if clones.size() < 2:
 		return
 	var clone := clones[0]
@@ -374,7 +374,7 @@ func _check_splitter_clone_bodies() -> void:
 	main_contact._resolve_collision()
 	_check(
 		_count_combat_events(main_contact.take_combat_events(), "ram_impact") == 1,
-		"分裂球本体撞到敌方球时触发较重的撞击音效"
+		"分身球本体撞到敌方球时触发较重的撞击音效"
 	)
 	while simulation.count_entities(0, "splitter_clone") < 4:
 		simulation.left_ability.activate(simulation.battle_context, simulation.left, simulation.right, 0)
@@ -750,9 +750,11 @@ func _check_global_settings_configuration() -> void:
 		"battle_time_seconds": 95,
 		"arena_width": 900,
 		"arena_height": 500,
+		"recording_fps": 48,
 	})
 	_check(configuration.settingi("battle_time_seconds") == 95, "全局设置保存默认对局时限")
 	_check(configuration.arena_size() == Vector2(900.0, 500.0), "全局设置保存实际竞技场宽高")
+	_check(configuration.settingi("recording_fps") == 48, "全局设置保存可选录制帧率")
 	var simulation := BattleSimulationScript.new(
 		20260912,
 		"splitter",
@@ -790,10 +792,12 @@ func _check_global_settings_configuration() -> void:
 		"battle_time_seconds": 2,
 		"arena_width": 9999,
 		"arena_height": "invalid",
+		"recording_fps": 999,
 	})
 	_check(normalized.settingi("battle_time_seconds") == 15, "全局时限按 Schema 下限收敛")
 	_check(normalized.settingi("arena_width") == 1920, "竞技场宽度按 Schema 上限收敛")
 	_check(normalized.settingi("arena_height") == 640, "非法竞技场高度恢复默认值")
+	_check(normalized.settingi("recording_fps") == 120, "录制帧率按 Schema 上限收敛")
 
 func _check_visual_rng_isolation() -> void:
 	var baseline := BattleSimulationScript.new(20260826, "splitter", "heaven")

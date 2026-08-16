@@ -12,6 +12,7 @@ func _init() -> void:
 
 func _run() -> void:
 	BallRegistry.configure_settings({})
+	_check_render_quality()
 	_check_viewport_margin()
 	_check_health_hud_policy()
 	await _check_settings_dialog()
@@ -39,6 +40,26 @@ func _run() -> void:
 		for failure in failures:
 			push_error("TEST FAILED: " + failure)
 		quit(1)
+
+func _check_render_quality() -> void:
+	var main_source := FileAccess.get_file_as_string("res://scripts/main.gd")
+	_check(
+		int(ProjectSettings.get_setting("display/window/size/viewport_width", 0)) == 1080
+			and int(ProjectSettings.get_setting("display/window/size/viewport_height", 0)) == 1920,
+		"Godot 母版使用原生 1080×1920 渲染目标"
+	)
+	_check(
+		main_source.contains("content_scale_size = LOGICAL_VIEWPORT_SIZE"),
+		"高清渲染保持原有 720×1280 逻辑布局并由 CanvasItems 原生栅格化"
+	)
+	_check(
+		ProjectSettings.get_setting("rendering/renderer/rendering_method", "") == "mobile",
+		"程序化 2D 图形使用支持 MSAA 的 Mobile 渲染器"
+	)
+	_check(
+		int(ProjectSettings.get_setting("rendering/anti_aliasing/quality/msaa_2d", 0)) >= 2,
+		"竞技场程序化图形启用至少 4x 2D MSAA"
+	)
 
 func _check_viewport_margin() -> void:
 	var view: BattleView = BattleViewScript.new()
@@ -70,6 +91,7 @@ func _check_health_hud_policy() -> void:
 	var view_source := FileAccess.get_file_as_string("res://scripts/ui/battle_view.gd")
 	var main_source := FileAccess.get_file_as_string("res://scripts/main.gd")
 	var clone_source := FileAccess.get_file_as_string("res://scripts/balls/splitter/clone_entity.gd")
+	var render_source := FileAccess.get_file_as_string("res://tools/render_video.sh")
 	_check(view_source.contains("simulation.left.max_hp"), "左侧顶部血条标注当前与最大血量")
 	_check(view_source.contains("simulation.right.max_hp"), "右侧顶部血条标注当前与最大血量")
 	_check(BattleViewScript.HEALTH_BAR_HEIGHT >= 16.0, "顶部血条具有醒目的可视高度")
@@ -82,6 +104,14 @@ func _check_health_hud_policy() -> void:
 	_check(main_source.contains("BallSettingsStoreScript.save_settings"), "球参数保存后由入口自动持久化")
 	_check(main_source.contains("GlobalSettingsStoreScript.save_settings"), "全局设置保存后由入口自动持久化")
 	_check(not main_source.contains("time_limit_spin_box"), "对局时限只有全局设置一个界面事实源")
+	_check(main_source.contains("OS.create_process"), "局内录制使用独立后台进程，不阻塞当前对局")
+	_check(main_source.contains("if not recording_mode:"), "录制呈现模式不创建下方操作区")
+	_check(render_source.contains("--resolution 1080x1920"), "录制进程显式请求 1080×1920 原生母版")
+	_check(render_source.contains("crop=1080:1200:0:0"), "视频从原生母版裁取 1080×1200 标题与完整战斗视图")
+	_check(not render_source.contains("scale=1080:1200"), "录制链路不再把低分辨率画面放大成 1080×1200")
+	_check(render_source.contains('--fixed-fps "$recording_fps"'), "视频生成脚本使用用户选择的录制帧率")
+	_check(render_source.contains("select='eq(n,${cover_frame})'"), "自动封面从开局后半秒选取一帧")
+	_check(render_source.contains("overlay=enable='eq(n,0)'"), "自动封面只替换最终视频第 1 帧")
 
 func _check_settings_dialog() -> void:
 	var dialog = BallSettingsDialogScript.new()
@@ -92,7 +122,7 @@ func _check_settings_dialog() -> void:
 	var controls := dialog.find_children("*", "SpinBox", true, false)
 	_check(
 		controls.size() == BallRegistry.get_module("splitter").setting_specs().size(),
-		"弹窗按分裂球 Schema 自动生成全部数值输入框"
+		"弹窗按分身球 Schema 自动生成全部数值输入框"
 	)
 	dialog.hide()
 	dialog.queue_free()
@@ -105,6 +135,7 @@ func _check_global_settings_dialog() -> void:
 		"battle_time_seconds": 90,
 		"arena_width": 900,
 		"arena_height": 500,
+		"recording_fps": 60,
 	})
 	await process_frame
 	_check(dialog.visible, "全局设置弹窗可以正常打开")
@@ -211,7 +242,7 @@ func _check_splitter_swarm_view() -> void:
 		var right_third_bounds: Rect2 = right_clones[2].call("mini_health_bar_bounds", right_main_bounds)
 		_check(right_third_bounds.position.x >= right_view.arena_screen_rect().end.x, "右侧单列细血条镜像排列在碰撞区外的展示留白")
 	else:
-		_check(false, "右侧分裂球能够生成用于 HUD 镜像检查的分身")
+		_check(false, "右侧分身球能够生成用于 HUD 镜像检查的分身")
 	right_view.queue_free()
 	await process_frame
 

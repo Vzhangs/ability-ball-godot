@@ -6,7 +6,7 @@ const VisualScript := preload("res://scripts/balls/splitter/visual.gd")
 func _init() -> void:
 	super({
 		"id": "splitter",
-		"name": "分裂球",
+		"name": "分身球",
 		"color": "4fd0e8",
 		"accent": "b9f8ff",
 		"max_hp": 100.0,

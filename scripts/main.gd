@@ -8,13 +8,19 @@ const BallSettingsDialogScript := preload("res://scripts/ui/ball_settings_dialog
 const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
 const GlobalSettingsStoreScript := preload("res://scripts/settings/global_settings_store.gd")
 const GlobalSettingsDialogScript := preload("res://scripts/ui/global_settings_dialog.gd")
+const BattleLoggerScript := preload("res://scripts/logging/battle_logger.gd")
+const LOGICAL_VIEWPORT_SIZE := Vector2i(720, 1280)
 const BATTLE_VIEW_POSITION := Vector2(35.0, 190.0)
+const RECORDING_TITLE_POSITION := Vector2(0.0, 12.0)
+const RECORDING_BATTLE_VIEW_POSITION := Vector2(35.0, 90.0)
+const RECORDING_FPS_OPTIONS := [24, 30, 60, 120]
 const RESULT_VIEW_GAP := 18.0
 
 var battle_view
 var seed_value := 20260815
 var time_limit_seconds: float = BattleSimulationScript.DEFAULT_BATTLE_TIME
 var battle_arena_size: Vector2 = BattleSimulationScript.DEFAULT_ARENA_SIZE
+var recording_fps := GlobalGameSettingsScript.DEFAULT_RECORDING_FPS
 var current_left_id := "vampire"
 var current_right_id := "six_king"
 var speed_values := [1.0, 2.0, 4.0]
@@ -28,16 +34,23 @@ var left_title_label: Label
 var right_title_label: Label
 var left_selector: OptionButton
 var right_selector: OptionButton
+var record_button: MenuButton
 var procedural_audio: ProceduralBattleAudio
 var settings_dialog
 var global_settings_dialog
+var battle_logger: BattleLogger
 var recording_mode := false
 var _recording_quit_scheduled := false
 var _startup_valid := true
 var _runtime_settings := {}
 var _runtime_global_settings := {}
+var _recording_process_id := 0
+var _recording_output_path := ""
+var _recording_previous_modified_time := 0
 
 func _ready() -> void:
+	# Keep UI coordinates stable while Godot rasterizes them into the native 1080×1920 render target.
+	get_window().content_scale_size = LOGICAL_VIEWPORT_SIZE
 	_apply_global_settings(GlobalSettingsStoreScript.load_settings())
 	_runtime_settings = BallSettingsStoreScript.load_settings()
 	BallRegistry.configure_settings(_runtime_settings)
@@ -51,16 +64,36 @@ func _ready() -> void:
 	seed_value = _seed_from_arguments(seed_value)
 	current_left_id = _ball_id_from_arguments("--left=", current_left_id)
 	current_right_id = _ball_id_from_arguments("--right=", current_right_id)
+	recording_fps = _recording_fps_from_arguments(recording_fps)
 	if not _startup_valid:
 		return
+	battle_logger = BattleLoggerScript.new()
 	procedural_audio = ProceduralAudioScript.new()
 	add_child(procedural_audio)
 	_build_background()
 	_build_header()
 	_build_battle_view()
 	_build_result_label()
-	_build_controls()
-	_build_footer()
+	if not recording_mode:
+		_build_controls()
+		_build_footer()
+
+func _exit_tree() -> void:
+	_finish_battle_log("interrupted", "process_exit")
+
+func _process(_delta: float) -> void:
+	if _recording_process_id <= 0 or OS.is_process_running(_recording_process_id):
+		return
+	_recording_process_id = 0
+	if record_button != null:
+		record_button.disabled = false
+		_update_recording_menu()
+	var modified_time := FileAccess.get_modified_time(_recording_output_path) \
+		if FileAccess.file_exists(_recording_output_path) else 0
+	if modified_time > _recording_previous_modified_time:
+		result_label.text = "录制完成 · builds/%s" % _recording_output_path.get_file()
+	else:
+		result_label.text = "录制失败 · 请检查 Godot / FFmpeg 输出"
 
 func _build_background() -> void:
 	var background := ColorRect.new()
@@ -71,17 +104,18 @@ func _build_background() -> void:
 	move_child(background, 0)
 
 func _build_header() -> void:
-	var kicker := Label.new()
-	kicker.text = "ABILITY BALL · 自动演算"
-	kicker.position = Vector2(0.0, 58.0)
-	kicker.size = Vector2(720.0, 34.0)
-	kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	kicker.add_theme_font_size_override("font_size", 18)
-	kicker.add_theme_color_override("font_color", Color("76808a"))
-	add_child(kicker)
+	if not recording_mode:
+		var kicker := Label.new()
+		kicker.text = "ABILITY BALL · 自动演算"
+		kicker.position = Vector2(0.0, 58.0)
+		kicker.size = Vector2(720.0, 34.0)
+		kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		kicker.add_theme_font_size_override("font_size", 18)
+		kicker.add_theme_color_override("font_color", Color("76808a"))
+		add_child(kicker)
 
 	var title := HBoxContainer.new()
-	title.position = Vector2(0.0, 106.0)
+	title.position = RECORDING_TITLE_POSITION if recording_mode else Vector2(0.0, 106.0)
 	title.size = Vector2(720.0, 66.0)
 	title.alignment = BoxContainer.ALIGNMENT_CENTER
 	title.add_theme_constant_override("separation", 18)
@@ -104,12 +138,13 @@ func _add_title_label(parent: Container, text: String, color: Color, font_size: 
 func _build_battle_view() -> void:
 	_replace_battle_view()
 
-func _replace_battle_view() -> void:
+func _replace_battle_view(end_reason: String = "battle_replaced") -> void:
 	if battle_view != null:
+		_finish_battle_log("interrupted", end_reason)
 		remove_child(battle_view)
 		battle_view.queue_free()
 	battle_view = BattleViewScript.new()
-	battle_view.position = BATTLE_VIEW_POSITION
+	battle_view.position = _battle_view_position()
 	battle_view.size = BattleViewScript.DEFAULT_VIEW_SIZE
 	add_child(battle_view)
 	battle_view.start_battle(
@@ -122,6 +157,7 @@ func _replace_battle_view() -> void:
 	battle_view.set_simulation_speed(speed_values[speed_index])
 	battle_view.battle_finished.connect(_on_battle_finished)
 	battle_view.combat_event.connect(_on_combat_event)
+	_start_battle_log()
 	_update_title()
 
 func _update_title() -> void:
@@ -135,13 +171,14 @@ func _update_title() -> void:
 func _build_result_label() -> void:
 	result_label = Label.new()
 	result_label.position = Vector2(
-		BATTLE_VIEW_POSITION.x,
-		BATTLE_VIEW_POSITION.y + BattleViewScript.DEFAULT_VIEW_SIZE.y + RESULT_VIEW_GAP
+		_battle_view_position().x,
+		_battle_view_position().y + BattleViewScript.DEFAULT_VIEW_SIZE.y + RESULT_VIEW_GAP
 	)
 	result_label.size = Vector2(650.0, 36.0)
 	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	result_label.add_theme_font_size_override("font_size", 17)
 	result_label.add_theme_color_override("font_color", Color("ffe257"))
+	result_label.visible = not recording_mode
 	add_child(result_label)
 
 func _build_controls() -> void:
@@ -167,6 +204,13 @@ func _build_controls() -> void:
 	var fight_button := _make_button("开始对战", Vector2(108.0, 46.0))
 	fight_button.pressed.connect(_start_selected_match)
 	selectors.add_child(fight_button)
+	record_button = MenuButton.new()
+	record_button.custom_minimum_size = Vector2(86.0, 46.0)
+	record_button.add_theme_font_size_override("font_size", 17)
+	record_button.tooltip_text = "选择帧率并录制当前完整对局"
+	record_button.get_popup().id_pressed.connect(_on_recording_fps_selected)
+	_update_recording_menu()
+	selectors.add_child(record_button)
 
 	var controls := HBoxContainer.new()
 	controls.position = Vector2(35.0, 1042.0)
@@ -226,7 +270,7 @@ func _start_selected_match() -> void:
 	seed_value = _parse_seed(seed_edit.text, seed_value)
 	_recording_quit_scheduled = false
 	result_label.text = ""
-	_replace_battle_view()
+	_replace_battle_view("selection_changed")
 	pause_button.text = "暂停"
 
 func _make_button(text: String, minimum_size: Vector2) -> Button:
@@ -235,6 +279,73 @@ func _make_button(text: String, minimum_size: Vector2) -> Button:
 	button.custom_minimum_size = minimum_size
 	button.add_theme_font_size_override("font_size", 17)
 	return button
+
+func _on_recording_fps_selected(fps: int) -> void:
+	recording_fps = clampi(fps, 24, 120)
+	_runtime_global_settings["recording_fps"] = recording_fps
+	var configuration = GlobalGameSettingsScript.new(_runtime_global_settings)
+	_runtime_global_settings = configuration.settings_snapshot()
+	recording_fps = configuration.settingi("recording_fps")
+	GlobalSettingsStoreScript.save_settings(_runtime_global_settings)
+	_update_recording_menu()
+	_record_current_battle()
+
+func _update_recording_menu() -> void:
+	if record_button == null:
+		return
+	record_button.text = "录制 %d帧" % recording_fps
+	var popup := record_button.get_popup()
+	popup.clear()
+	var fps_options := RECORDING_FPS_OPTIONS.duplicate()
+	if not fps_options.has(recording_fps):
+		fps_options.append(recording_fps)
+		fps_options.sort()
+	for fps in fps_options:
+		popup.add_check_item("%d FPS" % fps, fps)
+		popup.set_item_checked(popup.item_count - 1, fps == recording_fps)
+
+func _record_current_battle() -> void:
+	if recording_mode or _recording_process_id > 0:
+		return
+	var script_path := ProjectSettings.globalize_path("res://tools/render_video.sh")
+	if not FileAccess.file_exists(script_path):
+		result_label.text = "录制失败 · 找不到录制脚本"
+		return
+	var recording_seed: int = battle_view.simulation.seed_value
+	var recording_left_id: String = battle_view.simulation.left.id
+	var recording_right_id: String = battle_view.simulation.right.id
+	var recording_time_limit := int(round(battle_view.simulation.max_battle_time))
+	_recording_output_path = _video_output_path(recording_seed, recording_left_id, recording_right_id)
+	_recording_previous_modified_time = FileAccess.get_modified_time(_recording_output_path) \
+		if FileAccess.file_exists(_recording_output_path) else 0
+	var shell_path := OS.get_environment("SHELL")
+	if shell_path.is_empty() or not FileAccess.file_exists(shell_path):
+		shell_path = "/bin/bash"
+	var arguments := PackedStringArray([
+		"-l",
+		script_path,
+		str(recording_seed),
+		recording_left_id,
+		recording_right_id,
+		str(recording_time_limit),
+		str(recording_fps),
+	])
+	_recording_process_id = OS.create_process(shell_path, arguments)
+	if _recording_process_id <= 0:
+		result_label.text = "录制失败 · 无法启动后台进程"
+		return
+	record_button.disabled = true
+	record_button.text = "录制中…"
+	result_label.text = "正在后台录制本局…"
+
+func _video_output_path(seed: int, left_ball_id: String, right_ball_id: String) -> String:
+	var output_slug := "ability-ball-seed-%d" % seed
+	if left_ball_id != "vampire" or right_ball_id != "six_king":
+		output_slug = "ability-ball-%s-vs-%s-seed-%d" % [left_ball_id, right_ball_id, seed]
+	return ProjectSettings.globalize_path("res://builds/%s.mp4" % output_slug)
+
+func _battle_view_position() -> Vector2:
+	return RECORDING_BATTLE_VIEW_POSITION if recording_mode else BATTLE_VIEW_POSITION
 
 func _open_ball_settings() -> void:
 	if settings_dialog == null:
@@ -247,6 +358,7 @@ func _open_ball_settings() -> void:
 	settings_dialog.open_settings(_runtime_settings, preferred_id)
 
 func _on_ball_settings_submitted(settings: Dictionary) -> void:
+	_finish_battle_log("interrupted", "ball_settings_changed")
 	BallRegistry.configure_settings(settings)
 	_runtime_settings = BallRegistry.settings_snapshot()
 	var save_error: Error = BallSettingsStoreScript.save_settings(_runtime_settings)
@@ -254,7 +366,7 @@ func _on_ball_settings_submitted(settings: Dictionary) -> void:
 		result_label.text = "参数已应用，但保存失败：%s" % error_string(save_error)
 	else:
 		result_label.text = "球参数已保存并应用"
-	_replace_battle_view()
+	_replace_battle_view("ball_settings_changed")
 	pause_button.text = "暂停"
 
 func _open_global_settings() -> void:
@@ -265,13 +377,14 @@ func _open_global_settings() -> void:
 	global_settings_dialog.open_settings(_runtime_global_settings)
 
 func _on_global_settings_submitted(settings: Dictionary) -> void:
+	_finish_battle_log("interrupted", "global_settings_changed")
 	_apply_global_settings(settings)
 	var save_error: Error = GlobalSettingsStoreScript.save_settings(_runtime_global_settings)
 	if save_error != OK:
 		result_label.text = "全局设置已应用，但保存失败：%s" % error_string(save_error)
 	else:
 		result_label.text = "全局设置已保存并应用"
-	_replace_battle_view()
+	_replace_battle_view("global_settings_changed")
 	pause_button.text = "暂停"
 
 func _apply_global_settings(settings: Dictionary) -> void:
@@ -279,6 +392,8 @@ func _apply_global_settings(settings: Dictionary) -> void:
 	_runtime_global_settings = configuration.settings_snapshot()
 	time_limit_seconds = _time_limit_from_arguments(configuration.settingf("battle_time_seconds"))
 	battle_arena_size = configuration.arena_size()
+	recording_fps = configuration.settingi("recording_fps")
+	_update_recording_menu()
 
 func _build_footer() -> void:
 	var instructions := Label.new()
@@ -300,6 +415,7 @@ func _build_footer() -> void:
 	add_child(brand)
 
 func _on_battle_finished(simulation) -> void:
+	_finish_battle_log("completed", simulation.finish_reason)
 	var winner_name: String = simulation.winner().display_name
 	result_label.text = "%s获胜 · %s · 种子 %d" % [winner_name, simulation.finish_reason, simulation.seed_value]
 	if recording_mode and not _recording_quit_scheduled:
@@ -332,17 +448,18 @@ func _apply_speed(speed: float) -> void:
 
 func _restart_same_seed() -> void:
 	seed_value = _parse_seed(seed_edit.text, seed_value)
-	_start_seed(seed_value)
+	_start_seed(seed_value, "same_seed_restart")
 
 func _restart_random_seed() -> void:
 	seed_value = int(Time.get_ticks_usec() % 2147483647)
-	_start_seed(seed_value)
+	_start_seed(seed_value, "random_seed_restart")
 
 func _on_seed_submitted(value: String) -> void:
 	seed_value = _parse_seed(value, seed_value)
-	_start_seed(seed_value)
+	_start_seed(seed_value, "submitted_seed_restart")
 
-func _start_seed(value: int) -> void:
+func _start_seed(value: int, end_reason: String) -> void:
+	_finish_battle_log("interrupted", end_reason)
 	seed_value = value if value != 0 else 20260815
 	_recording_quit_scheduled = false
 	seed_edit.text = str(seed_value)
@@ -354,6 +471,7 @@ func _start_seed(value: int) -> void:
 		time_limit_seconds,
 		battle_arena_size
 	)
+	_start_battle_log()
 	battle_view.set_paused(false)
 	pause_button.text = "暂停"
 
@@ -376,6 +494,47 @@ func _time_limit_from_arguments(fallback: float) -> float:
 			if value.is_valid_float():
 				return clampf(value.to_float(), 15.0, 600.0)
 	return fallback
+
+func _recording_fps_from_arguments(fallback: int) -> int:
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--recording-fps="):
+			var value := argument.trim_prefix("--recording-fps=")
+			if value.is_valid_int():
+				return clampi(value.to_int(), 24, 120)
+	return fallback
+
+func _start_battle_log() -> void:
+	if battle_logger == null or battle_view == null or battle_view.simulation == null:
+		return
+	var simulation: BattleSimulation = battle_view.simulation
+	var log_error := battle_logger.begin(simulation, {
+		"mode": "recording" if recording_mode else "interactive",
+		"global_settings": _runtime_global_settings,
+		"all_ball_settings": _runtime_settings,
+		"recording": {
+			"fps": recording_fps,
+			"video_output_path": _video_output_path(
+				simulation.seed_value,
+				simulation.left.id,
+				simulation.right.id
+			) if recording_mode else "",
+		},
+		"view": {
+			"size": battle_view.size,
+			"position": battle_view.position,
+			"visible_world_size": battle_view.visible_world_size(),
+			"arena_screen_rect": battle_view.arena_screen_rect(),
+		},
+	})
+	if log_error != OK:
+		push_warning("对局开始日志写入失败：%s" % error_string(log_error))
+
+func _finish_battle_log(outcome: String, reason: String) -> void:
+	if battle_logger == null or battle_view == null or battle_view.simulation == null:
+		return
+	var log_error := battle_logger.finish(battle_view.simulation, outcome, reason)
+	if log_error != OK:
+		push_warning("对局结束日志写入失败：%s" % error_string(log_error))
 
 func _ball_id_from_arguments(prefix: String, fallback: String) -> String:
 	for argument in OS.get_cmdline_user_args():

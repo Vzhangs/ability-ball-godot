@@ -3,6 +3,7 @@ extends RefCounted
 
 const DEFAULT_BATTLE_TIME := 120.0
 const DEFAULT_ARENA_SIZE := Vector2(640.0, 640.0)
+const DEFAULT_RECORDING_FPS := 60
 
 const SETTING_SPECS := {
 	"battle_time_seconds": {
@@ -40,6 +41,18 @@ const SETTING_SPECS := {
 		"order": 30,
 		"suffix": " px",
 		"tooltip": "场地白框内的实际纵向碰撞范围，不是系统窗口高度。",
+	},
+	"recording_fps": {
+		"label": "录制帧率",
+		"group": "视频录制",
+		"default": DEFAULT_RECORDING_FPS,
+		"min": 24,
+		"max": 120,
+		"step": 1,
+		"kind": "int",
+		"order": 40,
+		"suffix": " FPS",
+		"tooltip": "只控制成片画面帧率；战斗物理始终以 60 Hz 固定步长计算。",
 	},
 }
 

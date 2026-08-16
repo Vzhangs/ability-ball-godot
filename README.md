@@ -20,12 +20,13 @@ godot --path .
 - `1`、`2`、`4`：切换演算速度
 - 在界面底部输入任意非零整数种子
 - 使用左右下拉框选择球，再点击“开始对战”
+- 点击录制菜单选择 24、30、60 或 120 FPS，并在后台按当前球、种子和持久化配置完整重演生成 MP4；当前窗口可以继续观看，成片不包含下方选项与操作区
 - 点击“全局设置”修改所有组合共用的默认对局时限和实际竞技场宽高
 - 点击“球参数”选择任意球，修改该球本体、技能和附属实体参数，再点击“保存并应用”
 
-球参数按球 ID 独立保存在 `user://ability_ball_settings.json`。例如把分裂球生命值改为 145、分身上限改为 7 后，它参加任何后续对局都继续使用这组值；其他球保留各自的配置。重开、随机种子、切换对手和重新启动项目都不会恢复默认值。“恢复此球默认”只重置弹窗当前选中的球，并在“保存并应用”后持久化。
+球参数按球 ID 独立保存在 `user://ability_ball_settings.json`。例如把分身球生命值改为 145、分身上限改为 7 后，它参加任何后续对局都继续使用这组值；其他球保留各自的配置。重开、随机种子、切换对手和重新启动项目都不会恢复默认值。“恢复此球默认”只重置弹窗当前选中的球，并在“保存并应用”后持久化。
 
-全局设置保存在 `user://ability_ball_global_settings.json`，首批包含默认对局时限、竞技场宽度和竞技场高度。竞技场宽高指场地白框内小球真正能够移动、碰撞和战斗的世界区域，不是 macOS 或 Godot 的外层系统窗口。保存后会立即按新设置重开当前对局，并供所有后续组合使用；默认值为 120 秒和 640×640，时限范围为 15～600 秒，宽、高范围均为 320～1920。
+全局设置保存在 `user://ability_ball_global_settings.json`，包含默认对局时限、竞技场宽高和录制帧率。竞技场宽高指场地白框内小球真正能够移动、碰撞和战斗的世界区域，不是 macOS 或 Godot 的外层系统窗口。录制帧率可在 24～120 FPS 间设置，默认 60 FPS，只改变成片画面采样，不改变 60 Hz 战斗物理。保存后会立即应用并供所有后续组合使用；默认时限为 120 秒，默认场地为 640×640。
 
 命令行也可以覆盖单局时限：
 
@@ -39,7 +40,7 @@ godot --path . -- --time-limit=90
 | --- | --- | --- |
 | `vampire` | 吸血鬼 | 吸血碰撞、血爆回复 |
 | `six_king` | 六王球 | 六向锚点、轨道审判 |
-| `splitter` | 分裂球 | 默认最多 100 个独立小球、分身生命与碰撞 |
+| `splitter` | 分身球 | 默认最多 100 个独立小球、分身生命与碰撞 |
 | `black_hole` | 黑洞球 | 远域捕获敌方附属物、保留原色、收缩轨道牵引、事件视界吞噬 |
 | `heaven` | 天堂球 | 短暂无敌、神圣冲刺 |
 | `sonic` | 音速球 | 持续加速、音爆冲撞 |
@@ -58,6 +59,7 @@ godot --path . -- --time-limit=90
 Main
  ├─ GlobalSettingsStore ─> user://ability_ball_global_settings.json
  ├─ BallSettingsStore ──> user://ability_ball_settings.json
+ ├─ BattleLogger ────────> builds/logs/<日期>/<battle-id>.jsonl
  ├─ BallRegistry ───────> balls/<id>/module.gd + 该球参数覆盖
  └─ BattleView ─────────> BattleSimulation
                             │
@@ -71,7 +73,7 @@ Main
 
 ### 运行时调用链
 
-1. `Main` 启动时分别读取全局设置和球参数。全局设置决定所有新对局的时限与竞技场尺寸；球参数按球 ID 交给 `BallRegistry`。创建或重开对局不会清空两类配置。
+1. `Main` 启动时分别读取全局设置和球参数。全局设置决定所有新对局的时限、竞技场尺寸与录制帧率；球参数按球 ID 交给 `BallRegistry`。创建或重开对局不会清空两类配置。
 2. `BallRegistry` 扫描 `scripts/balls/*/module.gd`，校验每个球自己的参数 Schema，应用该球的覆盖值后按 `sort_order` 生成唯一球库；UI、CLI、测试和视频工具都读取这份球库。
 3. `BattleSimulation` 接收已归一化的全局时限与竞技场尺寸，根据两个球模块各自唯一的配置创建 `FighterState` 和 `BallAbility`；两个球分别在 360° 内按种子生成可复现的初始方向，并以 60 Hz 固定步长推进物理与技能。
 4. `BallAbility` 只通过 `BallBattleContext` 造成伤害、治疗、生成实体、施加状态、读取确定性随机数和发送通用战斗事件。
@@ -82,9 +84,10 @@ Main
 
 | 组件 | 单一职责 |
 | --- | --- |
-| `GlobalGameSettings` | 声明所有组合共享的参数 Schema，并统一归一化时限与竞技场尺寸 |
+| `GlobalGameSettings` | 声明所有组合共享的参数 Schema，并统一归一化时限、竞技场尺寸与录制帧率 |
 | `GlobalSettingsStore` | 读写本机全局持久化参数；不保存任何球属性 |
 | `BallSettingsStore` | 读写按球 ID 分组的本机持久化参数；不识别具体球种 |
+| `BattleLogger` | 为每局写入独立 JSONL 开始/结束事件，收集配置、运行环境、状态与统计，不参与战斗规则 |
 | `BallRegistry` | 扫描 `scripts/balls/*/module.gd`，校验 Schema、应用对应球的参数覆盖并注册球模块 |
 | `BattleSimulation` | 固定步长、物理、碰撞、生命值、实体/状态生命周期和胜负 |
 | `BattleView` | HUD、通用粒子、通用光束，并通过契约调用模块绘制 |
@@ -111,7 +114,7 @@ Main
 
 ### 3. 球之间禁止源码依赖
 
-`scripts/balls/<id>/` 只能引用自身目录或 `scripts/balls/core/`。黑洞不会读取分裂球的 `clone_count`；它只操作实现了 `BallEntity.is_absorbable()` 的敌方空间实体。分身、投射物、持续区域、锚点等附属物自动进入统一捕获轨道，纯粒子、光束等无阵营视觉效果不参与战斗交互。
+`scripts/balls/<id>/` 只能引用自身目录或 `scripts/balls/core/`。黑洞不会读取分身球的 `clone_count`；它只操作实现了 `BallEntity.is_absorbable()` 的敌方空间实体。分身、投射物、持续区域、锚点等附属物自动进入统一捕获轨道，纯粒子、光束等无阵营视觉效果不参与战斗交互。
 
 ### 4. 私有状态归能力所有
 
@@ -129,7 +132,7 @@ Main
 - 跨帧状态实现 `blocks_damage()`、`preserves_external_velocity()`、`on_wall_hit()` 等钩子；
 - 通用核心只管理对象生命周期和调用顺序。
 
-新增一种可吞噬物时无需修改黑洞；修改黑洞时无需修改分裂球、浮游炮、火焰球或六王球。
+新增一种可吞噬物时无需修改黑洞；修改黑洞时无需修改分身球、浮游炮、火焰球或六王球。
 
 ### 6. 逻辑、表现、音效分离
 
@@ -161,7 +164,7 @@ Main
 
 ### 12. 全局规则独立持久化
 
-确实属于所有组合的规则进入 `GlobalGameSettings`，不伪装成某个球参数，也不散落在组合分支或主界面控件里。全局设置与球设置使用独立 Schema、独立文件和独立弹窗：前者当前拥有默认对局时限与竞技场宽高，后者只拥有具体球的本体、能力和附属物属性。
+确实属于所有组合的规则与生产参数进入 `GlobalGameSettings`，不伪装成某个球参数，也不散落在组合分支或主界面控件里。全局设置与球设置使用独立 Schema、独立文件和独立弹窗：前者拥有默认对局时限、竞技场宽高与录制帧率，后者只拥有具体球的本体、能力和附属物属性。
 
 全局值由 `Main` 在创建战斗时显式注入 `BattleSimulation`；模拟器和视图不直接读取用户文件。命令行 `--time-limit` 的优先级高于持久化默认时限，但只影响当前进程且不会回写文件。测试直接注入默认或指定全局值，不读取开发者机器上的个人配置。
 
@@ -175,7 +178,7 @@ Main
 | 状态归属 | 技能计时器、能力等级、形态、计数器和缓存属于对应 `BallAbility`、`BallEntity` 或 `BallStatusEffect`；不得扩张公共 `FighterState`。 |
 | 参数 Schema | 基础属性和所有玩法数值由所属球的 `module.gd` 声明 `label/default/min/max/step`；能力和实体通过 `setting()`、`settingf()` 或 `settingi()` 读取，不在实现中重复写死。 |
 | 参数持久化 | 参数按球 ID 长期保存。开始、重开或切换对局不得重置；恢复默认只影响明确选择的那个球。公共存储和弹窗不得识别具体球 ID。 |
-| 全局设置 | 所有组合共享的时限和竞技场尺寸由 `GlobalGameSettings` 定义并长期保存；不得把球属性放入全局 Schema，也不得为具体组合覆盖这些默认值。 |
+| 全局设置 | 所有组合共享的时限、竞技场尺寸和录制帧率由 `GlobalGameSettings` 定义并长期保存；不得把球属性放入全局 Schema，也不得为具体组合覆盖这些默认值。 |
 | 成长归属 | 禁止全局阶段。球的觉醒、成长和技能解锁只能由自己的唯一 `BallAbility` 保存与推进，公共 HUD 不显示统一阶段。 |
 | 战斗访问 | 能力只使用 `BallBattleContext`；需要新的通用能力时先扩展窄接口并证明至少适用于多个球，不能透传模拟器。 |
 | 随机性 | 玩法随机只使用 `battle.random_*()`；纯视觉随机只使用表现随机流。禁止用系统时间或全局随机数改变玩法。 |
@@ -324,7 +327,13 @@ macOS / Linux：
 ./tools/render_video.sh 20260815
 ```
 
-脚本使用 Godot Movie Maker 录制 720×1280、30 FPS 母版，再用 FFmpeg 生成接近短视频构图的 1080×1440、H.264/AAC MP4。成片写入 `builds/`。
+界面中的录制菜单和脚本共用同一条确定性生产链路：Godot Movie Maker 使用 1080×1920 原生渲染目标，按所选 24～120 FPS 重演对局；录制呈现模式不创建下方选项区。FFmpeg 从母版顶部直接裁取原生 1080×1200 内容并编码为 H.264/AAC MP4，不做低分辨率放大。最终视频第 1 帧会自动替换成封面帧：画面取自开局后约 0.5 秒，对决标题居中覆盖在内容区上部；从第 2 帧起恢复正常录制画面。封面不增加视频时长、不移动音频，也不额外生成独立图片。成片写入 `builds/`。
+
+视频文件使用 `ability-ball-<左球>-vs-<右球>-seed-<种子>.mp4` 命名；默认“吸血鬼 VS 六王球”沿用精简文件名 `ability-ball-seed-<种子>.mp4`。项目中的完整目录为：
+
+```text
+<项目目录>/builds/
+```
 
 生成任意组合：
 
@@ -339,6 +348,24 @@ macOS / Linux：
 ```bash
 ./tools/render_video.sh 20260819 black_hole replicator 90
 ```
+
+第五个参数指定录制帧率，例如以 60 FPS 生成：
+
+```bash
+./tools/render_video.sh 20260819 black_hole replicator 90 60
+```
+
+## 对局日志
+
+实际运行的每一局都会在开始和结束时写日志，包括界面内对局以及视频录制进程的确定性重演。日志位于：
+
+```text
+builds/logs/<UTC日期>/<battle-id>.jsonl
+```
+
+每局一个 JSONL 文件、两条核心事件：`battle_started` 和 `battle_finished`。正常打完的结束状态为 `completed`；重开、换球、修改参数或关闭进程时，未完成的一局记录为 `interrupted` 并保存具体原因。
+
+日志包含：UTC 时间与墙钟耗时、进程与 Godot/OS/渲染环境、运行模式、视频帧率和目标文件、种子、竞技场、时限与固定步长、所有持久化球参数、参战模块 Schema、双方初始/最终位置速度与血量、能力私有状态、状态效果、实体与视觉队列、胜者、结束原因、最终快照和全部统计。日志不会保存环境变量、用户名或认证信息。
 
 如果 Godot 或 FFmpeg 不在 `PATH` 中：
 
@@ -356,6 +383,7 @@ godot --headless --path . --script res://tests/test_architecture.gd
 godot --headless --path . --script res://tests/test_battle.gd
 godot --headless --path . --script res://tests/test_roster_battle.gd
 godot --headless --path . --script res://tests/test_roster_view.gd
+godot --headless --path . --script res://tests/test_battle_logger.gd
 godot --headless --path . --quit-after 120
 ```
 
@@ -366,7 +394,8 @@ godot --headless --path . --quit-after 120
 - 当前 `N×(N−1)/2` 种异种组合均可结束、产生真实伤害并触发专属能力；
 - 所有球、实体、状态效果和动态参数弹窗的真实绘制路径可以加载；
 - 按球覆盖、跨组合复用、越界归一化以及保存/重载后配置不串球；
-- 全局时限和竞技场宽高可持久化、跨组合生效，并进入真实碰撞与渲染边界。
+- 全局时限、竞技场宽高和录制帧率可持久化；玩法参数跨组合生效并进入真实碰撞与渲染边界，录制帧率只进入视频生产链路。
+- 每局日志具有配对的开始/结束事件，并保存可解析的完整配置、状态与统计。
 
 ## 主要目录
 
@@ -374,6 +403,7 @@ godot --headless --path . --quit-after 120
 - `scripts/balls/core/`：稳定球、实体、状态和渲染契约
 - `scripts/balls/<id>/`：每种球的全部私有实现
 - `scripts/settings/`：全局参数与球参数的 Schema、归一化和本机持久化
+- `scripts/logging/`：不参与玩法的结构化对局开始/结束日志
 - `scripts/ui/`：唯一战场视图、HUD 和通用视觉原语
 - `scripts/audio/`：实时合成的程序音效
 - `tests/`：规则回归、架构守卫、全组合和视觉烟测

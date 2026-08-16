@@ -13,6 +13,7 @@ const CORE_FILES := [
 	"res://scripts/balls/core/ball_status_effect.gd",
 	"res://scripts/balls/core/ball_visual.gd",
 	"res://scripts/balls/core/projectile_entity.gd",
+	"res://scripts/logging/battle_logger.gd",
 	"res://scripts/settings/ball_settings_store.gd",
 	"res://scripts/settings/global_game_settings.gd",
 	"res://scripts/settings/global_settings_store.gd",
@@ -90,8 +91,9 @@ func _check_global_settings_contract() -> void:
 	var settings = GlobalGameSettingsScript.new()
 	_check(settings.settingi("battle_time_seconds") == 120, "全局默认对局时限为两分钟")
 	_check(settings.arena_size() == Vector2(640.0, 640.0), "全局默认竞技场为 640×640")
+	_check(settings.settingi("recording_fps") == 60, "全局默认录制帧率为 60 FPS")
 	var specs: Dictionary = settings.setting_specs()
-	_check(specs.size() == 3, "全局 Schema 只包含时限与竞技场宽高")
+	_check(specs.size() == 4, "全局 Schema 包含时限、竞技场宽高与录制帧率")
 	_check(not specs.has("max_hp") and not specs.has("damage"), "全局设置不接管任何球属性")
 	var simulation_source := FileAccess.get_file_as_string("res://scripts/simulation/battle_simulation.gd")
 	_check(simulation_source.contains("time_limit_seconds"), "模拟器显式接收全局默认对局时限")

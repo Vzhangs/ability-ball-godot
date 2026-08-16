@@ -8,6 +8,7 @@ seed="${1:-20260815}"
 left_ball="${2:-vampire}"
 right_ball="${3:-six_king}"
 time_limit="${4:-120}"
+recording_fps="${5:-60}"
 
 if [[ ! "$seed" =~ ^-?[0-9]+$ ]] || [[ "$seed" == "0" ]]; then
   echo "种子必须是非零整数。" >&2
@@ -15,8 +16,13 @@ if [[ ! "$seed" =~ ^-?[0-9]+$ ]] || [[ "$seed" == "0" ]]; then
 fi
 
 if [[ ! "$time_limit" =~ ^[0-9]+$ ]] || (( time_limit < 15 || time_limit > 600 )); then
-  echo "对局时限必须是 15 到 600 秒之间的整数。" >&2
-  exit 2
+	echo "对局时限必须是 15 到 600 秒之间的整数。" >&2
+	exit 2
+fi
+
+if [[ ! "$recording_fps" =~ ^[0-9]+$ ]] || (( recording_fps < 24 || recording_fps > 120 )); then
+	echo "录制帧率必须是 24 到 120 之间的整数。" >&2
+	exit 2
 fi
 
 command -v "$godot_bin" >/dev/null || { echo "找不到 Godot：$godot_bin" >&2; exit 1; }
@@ -33,26 +39,29 @@ if [[ "$left_ball" != "vampire" ]] || [[ "$right_ball" != "six_king" ]]; then
 fi
 master_file="$project_dir/builds/${output_slug}-master.avi"
 output_file="$project_dir/builds/${output_slug}.mp4"
+cover_frame=$(( recording_fps / 2 ))
 
 "$godot_bin" \
   --path "$project_dir" \
-  --resolution 720x1280 \
+  --resolution 1080x1920 \
   --disable-vsync \
-  --fixed-fps 30 \
+  --fixed-fps "$recording_fps" \
   --write-movie "$master_file" \
   -- \
   --render-video \
   "--seed=$seed" \
   "--left=$left_ball" \
   "--right=$right_ball" \
-  "--time-limit=$time_limit"
+  "--time-limit=$time_limit" \
+  "--recording-fps=$recording_fps"
 
 "$ffmpeg_bin" -y -hide_banner \
   -i "$master_file" \
-  -vf "crop=720:960:0:0,scale=1080:1440:flags=lanczos" \
+  -filter_complex "[0:v]crop=1080:1200:0:0,split=3[normal][cover_base_source][cover_title_source];[cover_base_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,crop=1080:1094:0:106,pad=1080:1200:0:0:color=black[cover_base];[cover_title_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,crop=1080:110:0:0[cover_title];[cover_base][cover_title]overlay=0:120[cover];[normal][cover]overlay=enable='eq(n,0)':eof_action=pass[video]" \
+  -map "[video]" -map '0:a?' \
   -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p \
   -c:a aac -b:a 192k \
   -movflags +faststart \
   "$output_file"
 
-echo "视频已生成：$output_file"
+echo "视频已生成（第 1 帧为自动封面）：$output_file"
