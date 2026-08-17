@@ -19,6 +19,24 @@ class TestAbsorbableEntity extends BallEntity:
 	func is_absorbable() -> bool:
 		return true
 
+class TestDamageableEntity extends BallEntity:
+	var hp := 100.0
+
+	func _init(spawn_owner: int, spawn_position: Vector2, spawn_radius: float) -> void:
+		owner_side = spawn_owner
+		pos = spawn_position
+		radius = spawn_radius
+
+	func can_receive_attack(source_side: int) -> bool:
+		return not removed and is_hostile_to(source_side)
+
+	func receive_attack(_battle, amount: float, source_side: int, _hit_color: Color) -> float:
+		if not can_receive_attack(source_side):
+			return 0.0
+		var applied := minf(hp, amount)
+		hp -= applied
+		return applied
+
 func _init() -> void:
 	BallRegistry.configure_settings({})
 	_check(BallRegistry.is_valid(), "球模块注册表通过完整性校验")
@@ -40,7 +58,10 @@ func _init() -> void:
 	_check_seeded_spawn_directions()
 	_check_inertial_motion()
 	_check_contact_damage_contract()
+	_check_sonic_speed_growth()
 	_check_combat_audio_contract()
+	_check_wind_swordsman_abilities()
+	_check_yuri_abilities()
 	_check_replicator_dual_ring_formation()
 	_check_splitter_clone_bodies()
 	_check_splitter_attack_reception()
@@ -185,9 +206,69 @@ func _check_contact_damage_contract() -> void:
 	_check(is_equal_approx(damaging_contact.left.hp, vampire_hp), "没有碰撞能力的一侧不会反向造成伤害")
 	_check(damaging_contact.right.hp < laser_hp, "吸血鬼通过自身碰撞能力显式造成伤害")
 
+func _check_sonic_speed_growth() -> void:
+	var module: BallModule = BallRegistry.get_module("sonic")
+	_check(is_equal_approx(module.cooldown, 1.0), "音速球默认每 1 秒增长一次速度")
+	_check(is_equal_approx(module.settingf("speed_growth_ratio"), 0.10), "音速球每次速度增长默认使用 10%")
+	var simulation := BattleSimulationScript.new(20260916, "sonic", "laser")
+	var ability: BallAbility = simulation.left_ability
+	_check(is_equal_approx(
+		ability.speed_multiplier(simulation.battle_context, simulation.left, simulation.right, 0),
+		1.0
+	), "音速球开局保持初始速度倍率")
+	for _frame in range(59):
+		simulation.step(BattleSimulation.FIXED_STEP)
+	_check(int(simulation.stats["abilities"]["sonic"]) == 0, "未满 1 秒时音速球不会提前加速")
+	for _frame in range(2):
+		simulation.step(BattleSimulation.FIXED_STEP)
+	_check(int(simulation.stats["abilities"]["sonic"]) == 1, "满 1 秒后音速球恰好完成一次加速")
+	_check(is_equal_approx(
+		ability.speed_multiplier(simulation.battle_context, simulation.left, simulation.right, 0),
+		1.10
+	), "第一次加速把速度倍率乘以 1.10")
+	_check(is_equal_approx(
+		simulation.left.velocity.length(),
+		simulation.left.base_speed * 1.10
+	), "音速球的真实移动速度同步增长到初速的 1.10 倍")
+	for _frame in range(60):
+		simulation.step(BattleSimulation.FIXED_STEP)
+	_check(int(simulation.stats["abilities"]["sonic"]) == 2, "再经过 1 秒后音速球完成第二次加速")
+	_check(is_equal_approx(
+		ability.speed_multiplier(simulation.battle_context, simulation.left, simulation.right, 0),
+		1.21
+	), "连续加速按 10% 复利叠加")
+	simulation.left.velocity = Vector2.RIGHT * simulation.left.base_speed * 2.0
+	_check(is_equal_approx(
+		ability.contact_damage(simulation.battle_context, simulation.left, simulation.right),
+		module.settingf("body_impact_damage") * 2.0
+	), "音速球撞击伤害按实时速度倍率同比增长且不再使用封顶增伤")
+	var wave_simulation := BattleSimulationScript.new(20260917, "sonic", "laser")
+	var wave_ability: BallAbility = wave_simulation.left_ability
+	wave_ability.activate(
+		wave_simulation.battle_context,
+		wave_simulation.left,
+		wave_simulation.right,
+		0
+	)
+	_check(wave_simulation.impact_rings.size() == 1, "音速球提速时立即释放第一层音波")
+	for expected_layers in range(2, 5):
+		wave_ability.on_step(
+			wave_simulation.battle_context,
+			wave_simulation.left,
+			wave_simulation.right,
+			0,
+			0.10
+		)
+		_check(
+			wave_simulation.impact_rings.size() == expected_layers,
+			"音速球音波按时序扩散到第 %d 层" % expected_layers
+		)
+	_check(wave_simulation.particles.is_empty(), "音速球提速改用纯音波扩散，不再喷射爆炸粒子")
+
 func _check_combat_audio_contract() -> void:
 	var audio = ProceduralAudioScript.new()
-	for kind in ["impact", "body_impact", "volley", "projectile_hit", "split", "clone_impact", "ram_impact"]:
+	audio.configure_samples(BallRegistry.audio_samples())
+	for kind in ["impact", "body_impact", "volley", "projectile_hit", "split", "clone_impact", "ram_impact", "blade_slash", "wind_cast", "wind_absorb", "psychic_pulse"]:
 		_check(audio.supports_event(kind), "程序音频支持 %s 战斗事件" % kind)
 	_check(ProceduralAudioScript.GENERATOR_BUFFER_LENGTH <= 0.05, "程序音频缓存不超过 50 毫秒")
 	_check(ProceduralAudioScript.AUDIO_PROCESS_PRIORITY > 0, "音频混音晚于战斗节点处理同帧事件")
@@ -195,7 +276,542 @@ func _check_combat_audio_contract() -> void:
 	_check(float(impact_profile["attack"]) <= 0.001, "大球撞击使用 1 毫秒快速起音")
 	_check(float(impact_profile["frequency"]) >= 200.0, "大球撞击主体包含可辨识的中频敲击")
 	_check(float(impact_profile["transient"]) >= 0.5, "大球撞击包含清晰的宽频瞬态")
+	_check(audio.has_sample_event("blade_slash"), "风剑球 Q 使用模块自带的国服 Hasagi 变声采样")
+	_check(audio.sample_event_duration("blade_slash") >= 0.5, "国服 Hasagi 变声采样保留完整可辨识喊声")
+	_check(not audio.has_sample_event("wind_cast"), "风剑球 W 不再注册任何台词语音采样")
+	var wind_profile: Dictionary = audio.event_profile("wind_cast")
+	_check(float(wind_profile["frequency_end"]) > float(wind_profile["frequency"]), "风障展开只使用无台词的上扬合成风声")
+	var psychic_profile: Dictionary = audio.event_profile("psychic_pulse")
+	_check(float(psychic_profile["frequency_end"]) > float(psychic_profile["frequency"]), "尤里球精神波使用上扬电子扫频")
+	_check(float(psychic_profile["duration"]) >= 0.4, "尤里球精神波音效拥有可辨识的持续时间")
 	audio.free()
+
+func _check_wind_swordsman_abilities() -> void:
+	var module: BallModule = BallRegistry.get_module("wind_swordsman")
+	for key in [
+		"slash_damage",
+		"slash_trigger_range",
+		"slash_reach",
+		"slash_half_width",
+		"slash_cooldown",
+		"slash_effect_duration",
+		"crack_duration",
+		"wall_duration",
+		"max_walls",
+		"wall_distance",
+		"wall_curve_radius",
+		"wall_arc_degrees",
+		"wall_thickness",
+		"wall_activation_lookahead",
+		"skill_standstill_duration",
+	]:
+		_check(module.setting_specs().has(key), "风剑球参数 %s 由自身 Schema 配置" % key)
+
+	var slash_simulation := BattleSimulationScript.new(20260918, "wind_swordsman", "replicator")
+	slash_simulation.left.pos = Vector2(260.0, 320.0)
+	slash_simulation.right.pos = Vector2(360.0, 320.0)
+	slash_simulation.left.velocity = Vector2.ZERO
+	slash_simulation.right.velocity = Vector2.ZERO
+	var along_slash_entity := TestDamageableEntity.new(1, slash_simulation.left.pos + Vector2(62.0, 0.0), 5.0)
+	var off_axis_entity := TestDamageableEntity.new(1, slash_simulation.right.pos + Vector2(0.0, 50.0), 5.0)
+	slash_simulation.add_entity(along_slash_entity)
+	slash_simulation.add_entity(off_axis_entity)
+	var right_hp_before := slash_simulation.right.hp
+	slash_simulation.take_combat_events()
+	slash_simulation.left_ability.on_step(
+		slash_simulation.battle_context,
+		slash_simulation.left,
+		slash_simulation.right,
+		0,
+		BattleSimulation.FIXED_STEP
+	)
+	_check(is_equal_approx(
+		right_hp_before - slash_simulation.right.hp,
+		module.settingf("slash_damage")
+	), "风剑球贴近对手时沿自身至目标方向自动斩击并造成配置伤害")
+	_check(is_equal_approx(along_slash_entity.hp, 100.0 - module.settingf("slash_damage")), "斩击命中风剑球至敌球方向线段上的附属实体")
+	_check(is_equal_approx(off_axis_entity.hp, 100.0), "斩击不会继续使用固定屏幕纵向命中")
+	_check(int(slash_simulation.stats.get("wind_slashes", 0)) == 1, "贴身指向斩击拥有独立触发统计")
+	var slash_effects: Array[BallEntity] = slash_simulation.entity_list(0, "wind_slash_vfx")
+	_check(slash_effects.size() == 1, "贴身指向斩击生成球内私有梭形刀光实体")
+	if not slash_effects.is_empty():
+		_check(slash_effects[0].pos == slash_simulation.left.pos, "梭形刀光从风剑球本体位置起斩")
+		_check(slash_effects[0].get("_direction").is_equal_approx(Vector2.RIGHT), "梭形刀光朝当前敌球方向延伸")
+		_check(is_equal_approx(slash_effects[0].remaining, module.settingf("slash_effect_duration")), "刀痕按风剑球持久化参数延长显示")
+	var ground_cracks: Array[BallEntity] = slash_simulation.entity_list(0, "wind_ground_crack")
+	_check(ground_cracks.size() == 1, "指向斩击命中位置生成同方向地面裂痕实体")
+	if not ground_cracks.is_empty():
+		_check(is_equal_approx(ground_cracks[0].remaining, module.settingf("crack_duration")), "地面裂痕按风剑球配置短暂保留")
+		_check(ground_cracks[0].get("_direction").is_equal_approx(Vector2.RIGHT), "地面沟槽沿风剑球至敌球方向破裂")
+		_check(ground_cracks[0].pos.is_equal_approx(
+			slash_simulation.left.pos + Vector2.RIGHT * module.settingf("slash_reach") * 0.5
+		), "地面裂痕与刀光使用同一起点、终点和中心轴")
+	_check(
+		_count_combat_events(slash_simulation.take_combat_events(), "blade_slash") == 1,
+		"贴身指向斩击发送原创高频刀锋音效事件"
+	)
+	var hp_after_first_slash := slash_simulation.right.hp
+	slash_simulation.left_ability.on_step(
+		slash_simulation.battle_context,
+		slash_simulation.left,
+		slash_simulation.right,
+		0,
+		BattleSimulation.FIXED_STEP
+	)
+	_check(is_equal_approx(slash_simulation.right.hp, hp_after_first_slash), "贴身指向斩击遵守自身独立冷却")
+	_check(is_zero_approx(
+		slash_simulation.left_ability.contact_damage(
+			slash_simulation.battle_context,
+			slash_simulation.left,
+			slash_simulation.right
+		)
+	), "风剑球普通本体碰撞保持零伤害")
+
+	var standstill_simulation := BattleSimulationScript.new(20261003, "wind_swordsman", "laser")
+	standstill_simulation.left.pos = Vector2(260.0, 320.0)
+	standstill_simulation.right.pos = Vector2(350.0, 320.0)
+	var movement_before_cast := Vector2(180.0, 45.0)
+	standstill_simulation.left.velocity = movement_before_cast
+	standstill_simulation.left_ability.on_step(
+		standstill_simulation.battle_context,
+		standstill_simulation.left,
+		standstill_simulation.right,
+		0,
+		BattleSimulation.FIXED_STEP
+	)
+	var standstill_duration := module.settingf("skill_standstill_duration")
+	_check(is_equal_approx(standstill_duration, 1.0), "风剑球默认施法立定时间为 1 秒")
+	_check(
+		standstill_simulation.left.velocity == Vector2.ZERO
+			and is_zero_approx(standstill_simulation.left_ability.speed_multiplier(
+				standstill_simulation.battle_context,
+				standstill_simulation.left,
+				standstill_simulation.right,
+				0
+			)),
+		"风剑球斩击瞬间停止移动并禁用最低速度补偿"
+	)
+	standstill_simulation.left_ability.before_motion(
+		standstill_simulation.battle_context,
+		standstill_simulation.left,
+		standstill_simulation.right,
+		0,
+		standstill_duration - 0.01
+	)
+	_check(standstill_simulation.left.velocity == Vector2.ZERO, "风剑球在完整立定时间内保持静止")
+	standstill_simulation.left_ability.before_motion(
+		standstill_simulation.battle_context,
+		standstill_simulation.left,
+		standstill_simulation.right,
+		0,
+		0.02
+	)
+	_check(standstill_simulation.left.velocity == Vector2.ZERO, "跨过 1 秒边界的当前物理帧仍保持静止")
+	standstill_simulation.left_ability.before_motion(
+		standstill_simulation.battle_context,
+		standstill_simulation.left,
+		standstill_simulation.right,
+		0,
+		0.0
+	)
+	_check(
+		standstill_simulation.left.velocity.is_equal_approx(movement_before_cast),
+		"立定结束后风剑球恢复施法前的运动方向和速度"
+	)
+
+	var attachment_simulation := BattleSimulationScript.new(20260921, "wind_swordsman", "replicator")
+	attachment_simulation.left.pos = Vector2(260.0, 320.0)
+	attachment_simulation.right.pos = Vector2(520.0, 320.0)
+	attachment_simulation.left.velocity = Vector2.ZERO
+	attachment_simulation.right.velocity = Vector2.ZERO
+	var attachment_target := TestDamageableEntity.new(1, Vector2(260.0, 390.0), 5.0)
+	attachment_simulation.add_entity(attachment_target)
+	var distant_main_hp := attachment_simulation.right.hp
+	attachment_simulation.left_ability.on_step(
+		attachment_simulation.battle_context,
+		attachment_simulation.left,
+		attachment_simulation.right,
+		0,
+		BattleSimulation.FIXED_STEP
+	)
+	_check(is_equal_approx(
+		attachment_target.hp,
+		100.0 - module.settingf("slash_damage")
+	), "敌方主球斩不到时，风剑球主动朝最近的可受击附属物挥刀")
+	_check(is_equal_approx(attachment_simulation.right.hp, distant_main_hp), "朝附属物挥刀不会隔空扣除未被刀痕覆盖的主球生命")
+	var attachment_slashes: Array[BallEntity] = attachment_simulation.entity_list(0, "wind_slash_vfx")
+	_check(attachment_slashes.size() == 1, "只有附属物可斩时仍会生成完整刀痕")
+	if not attachment_slashes.is_empty():
+		_check(attachment_slashes[0].get("_direction").is_equal_approx(Vector2.DOWN), "附属物目标决定真实挥刀方向")
+	var attachment_cracks: Array[BallEntity] = attachment_simulation.entity_list(0, "wind_ground_crack")
+	_check(attachment_cracks.size() == 1, "朝附属物斩击时同步生成下层地面裂痕")
+	if not attachment_cracks.is_empty():
+		_check(attachment_cracks[0].pos.is_equal_approx(
+			attachment_simulation.left.pos + Vector2.DOWN * module.settingf("slash_reach") * 0.5
+		), "朝附属物斩击时刀光与裂痕仍完整重叠")
+
+	var wall_simulation := BattleSimulationScript.new(20260919, "wind_swordsman", "replicator")
+	wall_simulation.left.pos = Vector2(250.0, 320.0)
+	wall_simulation.right.pos = Vector2(520.0, 320.0)
+	wall_simulation.left.velocity = Vector2(170.0, -35.0)
+	wall_simulation.left_ability.activate(
+		wall_simulation.battle_context,
+		wall_simulation.left,
+		wall_simulation.right,
+		0
+	)
+	_check(wall_simulation.left.velocity == Vector2.ZERO, "风剑球释放风障时同样立即立定")
+	var walls: Array[BallEntity] = wall_simulation.entity_list(0, "wind_wall")
+	_check(walls.size() == 1, "风障技能生成一个独立曲面实体")
+	if walls.is_empty():
+		return
+	_check(walls[0].is_absorbable(), "曲面风障继续遵守黑洞可捕获附属物契约")
+	var hostile_color := Color("ff824a")
+	wall_simulation.add_projectile(
+		1,
+		Vector2(380.0, 320.0),
+		Vector2(-1800.0, 0.0),
+		5.0,
+		9.0,
+		hostile_color,
+		2.0,
+		"wind_wall_hostile_test"
+	)
+	var hostile_projectile: BallEntity = wall_simulation.entity_list(1, "projectile")[-1]
+	walls[0].call("intercept_projectiles", wall_simulation.battle_context, 0.05)
+	_check(hostile_projectile.removed, "敌方高速投射物跨越弧线时也会被连续轨迹拦截")
+	_check(hostile_projectile.owner_side == 1, "风障吸收投射物时不改变原所属阵营")
+	_check(hostile_projectile.absorption_visual_color() == hostile_color, "风障吸收时不改变投射物原色")
+	_check(int(wall_simulation.stats.get("projectiles_blocked", 0)) == 1, "风障拦截进入独立投射物统计")
+	_check(
+		_count_combat_events(wall_simulation.take_combat_events(), "wind_absorb") == 1,
+		"风障吸收投射物时发送尖锐电子收束音效"
+	)
+	wall_simulation.add_projectile(
+		0,
+		Vector2(380.0, 320.0),
+		Vector2(-1800.0, 0.0),
+		5.0,
+		9.0,
+		Color("8ff5ff"),
+		2.0,
+		"wind_wall_friendly_test"
+	)
+	var friendly_projectile: BallEntity = wall_simulation.entity_list(0, "projectile")[-1]
+	walls[0].call("intercept_projectiles", wall_simulation.battle_context, 0.05)
+	_check(not friendly_projectile.removed, "己方投射物可以穿过自己的风障")
+	wall_simulation.add_projectile(
+		1,
+		Vector2(380.0, 120.0),
+		Vector2(-1800.0, 0.0),
+		5.0,
+		9.0,
+		Color.WHITE,
+		2.0,
+		"wind_wall_off_arc_test"
+	)
+	var off_arc_projectile: BallEntity = wall_simulation.entity_list(1, "projectile")[-1]
+	walls[0].call("intercept_projectiles", wall_simulation.battle_context, 0.05)
+	_check(not off_arc_projectile.removed, "未命中弧形几何的敌方投射物不会被错误吸收")
+
+func _check_yuri_abilities() -> void:
+	var module: BallModule = BallRegistry.get_module("yuri")
+	for key in [
+		"control_range",
+		"max_control_per_cast",
+		"max_controlled_total",
+		"controlled_velocity_multiplier",
+		"control_backlash_damage",
+		"pulse_duration",
+		"link_duration",
+	]:
+		_check(module.setting_specs().has(key), "尤里球参数 %s 由自身 Schema 配置" % key)
+
+	var control_simulation := BattleSimulationScript.new(20260922, "yuri", "replicator")
+	control_simulation.left.pos = Vector2(250.0, 320.0)
+	control_simulation.right.pos = Vector2(520.0, 320.0)
+	control_simulation.left.velocity = Vector2.ZERO
+	control_simulation.right.velocity = Vector2.ZERO
+	var projectile_color := Color("ff8bd8")
+	control_simulation.add_projectile(
+		1,
+		Vector2(320.0, 320.0),
+		Vector2(-200.0, 0.0),
+		5.0,
+		9.0,
+		projectile_color,
+		4.0,
+		"mind_control_fixture"
+	)
+	var projectile: BallProjectileEntity = control_simulation.entity_list(1, "projectile")[0]
+	var first_target := TestAbsorbableEntity.new(1, Vector2(340.0, 320.0), 6.0, "mind_control_first")
+	var second_target := TestAbsorbableEntity.new(1, Vector2(360.0, 320.0), 6.0, "mind_control_second")
+	var third_target := TestAbsorbableEntity.new(1, Vector2(380.0, 320.0), 6.0, "mind_control_third")
+	first_target.velocity = Vector2(-100.0, 0.0)
+	control_simulation.add_entity(first_target)
+	control_simulation.add_entity(second_target)
+	control_simulation.add_entity(third_target)
+	var opponent_hp_before := control_simulation.right.hp
+	control_simulation.take_combat_events()
+	control_simulation.left_ability.activate(
+		control_simulation.battle_context,
+		control_simulation.left,
+		control_simulation.right,
+		0
+	)
+	_check(not projectile.can_transfer_ownership(), "投射物类型在通用协议层永久拒绝阵营转移")
+	_check(projectile.owner_side == 1, "尤里球不会控制范围内最近的敌方投射物")
+	_check(projectile.color == projectile_color, "未被控制的投射物保持原色")
+	_check(projectile.velocity.x < 0.0, "未被控制的投射物保持原运动方向")
+	_check(first_target.owner_side == 0, "尤里球跳过投射物并夺取最近的非投射附属物")
+	_check(second_target.owner_side == 0, "单次控制继续夺取第二个最近附属物")
+	_check(third_target.owner_side == 1, "单次控制数量上限阻止第三个附属物同时倒戈")
+	_check(first_target.velocity.x > 0.0, "被控制的移动附属物立即掉头冲向原阵营")
+	_check(
+		first_target.absorption_visual_color() == control_simulation.left.accent
+			and second_target.absorption_visual_color() == control_simulation.left.accent,
+		"被尤里球控制的附属物统一染为尤里紫"
+	)
+	_check(int(control_simulation.left_ability.call("controlled_count")) == 2, "尤里球私有状态准确记录当前受控物数量")
+	_check(int(control_simulation.stats.get("mind_controls", 0)) == 2, "每个成功倒戈对象进入心灵控制统计")
+	_check(is_equal_approx(
+		opponent_hp_before - control_simulation.right.hp,
+		module.settingf("control_backlash_damage") * 2.0
+	), "每次所有权夺取都会对原主人造成配置化精神反噬")
+	_check(control_simulation.count_entities(0, "psychic_pulse_vfx") == 1, "心灵控制释放独立扩散精神波")
+	_check(control_simulation.count_entities(0, "psychic_eye_overlay_vfx") == 1, "尤里施法生成独立顶层眼睛动画")
+	_check(control_simulation.count_entities(0, "psychic_link_vfx") == 2, "每个倒戈目标生成独立控制链")
+	_check(
+		_count_combat_events(control_simulation.take_combat_events(), "psychic_pulse") == 1,
+		"成功心灵控制发送原创精神扫频音效"
+	)
+	_check(is_zero_approx(
+		control_simulation.left_ability.contact_damage(
+			control_simulation.battle_context,
+			control_simulation.left,
+			control_simulation.right
+		)
+	), "尤里球普通本体碰撞保持零伤害")
+
+	var no_target_simulation := BattleSimulationScript.new(20260923, "yuri", "laser")
+	no_target_simulation.left.pos = Vector2(250.0, 320.0)
+	no_target_simulation.right.pos = Vector2(500.0, 320.0)
+	no_target_simulation.left.velocity = Vector2.ZERO
+	no_target_simulation.right.velocity = Vector2(-120.0, 40.0)
+	var no_target_hp_before := no_target_simulation.right.hp
+	var no_target_velocity_before := no_target_simulation.right.velocity
+	no_target_simulation.take_combat_events()
+	no_target_simulation.left_ability.activate(
+		no_target_simulation.battle_context,
+		no_target_simulation.left,
+		no_target_simulation.right,
+		0
+	)
+	_check(
+		is_equal_approx(no_target_simulation.right.hp, no_target_hp_before)
+			and no_target_simulation.right.velocity.is_equal_approx(no_target_velocity_before),
+		"没有可控制附属物时，尤里球不伤害也不改变敌方主球运动"
+	)
+	_check(
+		no_target_simulation.beams.is_empty()
+			and no_target_simulation.impact_rings.is_empty()
+			and no_target_simulation.particles.is_empty(),
+		"没有可控制附属物时，不生成激光、震荡波、命中特效或粒子"
+	)
+	_check(
+		no_target_simulation.count_entities(0, "psychic_pulse_vfx") == 0
+			and no_target_simulation.count_entities(0, "psychic_eye_overlay_vfx") == 0
+			and no_target_simulation.count_entities(0, "psychic_link_vfx") == 0,
+		"没有可控制附属物时，不生成控制眼睛、精神波或控制链"
+	)
+	_check(
+		_count_combat_events(no_target_simulation.take_combat_events(), "psychic_pulse") == 0,
+		"没有可控制附属物时，不播放精神控制音效"
+	)
+
+	var captured_simulation := BattleSimulationScript.new(20260924, "yuri", "replicator")
+	captured_simulation.left.pos = Vector2(250.0, 320.0)
+	captured_simulation.right.pos = Vector2(500.0, 320.0)
+	var captured_target := TestAbsorbableEntity.new(1, Vector2(320.0, 320.0), 5.0, "captured_control_fixture")
+	captured_simulation.add_entity(captured_target)
+	_check(captured_target.disable_for_capture(), "反制夹具先进入黑洞式捕获禁用状态")
+	captured_simulation.left_ability.activate(
+		captured_simulation.battle_context,
+		captured_simulation.left,
+		captured_simulation.right,
+		0
+	)
+	_check(captured_target.owner_side == 1, "已经被捕获禁用的对象不能再被尤里球抢夺")
+
+	var orbit_simulation := BattleSimulationScript.new(20260927, "yuri", "replicator")
+	orbit_simulation.left.pos = Vector2(190.0, 320.0)
+	orbit_simulation.right.pos = Vector2(430.0, 320.0)
+	orbit_simulation.left.velocity = Vector2.ZERO
+	orbit_simulation.right.velocity = Vector2.ZERO
+	orbit_simulation.right_ability.activate(
+		orbit_simulation.battle_context,
+		orbit_simulation.right,
+		orbit_simulation.left,
+		1
+	)
+	var orbit_cannons: Array[BallEntity] = orbit_simulation.entity_list(1, "clone")
+	_check(orbit_cannons.size() == 1, "永久控制测试生成一门敌方浮游炮")
+	if not orbit_cannons.is_empty():
+		var orbit_cannon := orbit_cannons[0]
+		var native_orbit_radius: float = BallRegistry.get_module("replicator").settingf("inner_orbit_radius")
+		_check(is_equal_approx(
+			orbit_cannon.pos.distance_to(orbit_simulation.right.pos),
+			native_orbit_radius
+		), "浮游炮被控制前围绕原主人使用自身原轨道半径")
+		orbit_simulation.left_ability.activate(
+			orbit_simulation.battle_context,
+			orbit_simulation.left,
+			orbit_simulation.right,
+			0
+		)
+		_check(orbit_cannon.owner_side == 0, "尤里球永久夺取浮游炮所有权")
+		_check(is_equal_approx(
+			orbit_cannon.pos.distance_to(orbit_simulation.left.pos),
+			native_orbit_radius
+		), "被控制浮游炮立即把尤里球作为新轨道中心")
+		var controlled_projectiles_before := orbit_simulation.count_entities(0, "projectile")
+		var controlled_cannon_position := orbit_cannon.pos
+		orbit_simulation.right_ability.activate(
+			orbit_simulation.battle_context,
+			orbit_simulation.right,
+			orbit_simulation.left,
+			1
+		)
+		var controlled_projectiles: Array[BallEntity] = orbit_simulation.entity_list(0, "projectile")
+		_check(
+			controlled_projectiles.size() == controlled_projectiles_before + 1,
+			"被尤里永久控制的浮游炮继续按原生齐射节奏发射子弹"
+		)
+		if controlled_projectiles.size() > controlled_projectiles_before:
+			var controlled_projectile: BallEntity = controlled_projectiles[-1]
+			_check(
+				controlled_projectile.owner_side == 0
+					and controlled_projectile.pos.is_equal_approx(controlled_cannon_position),
+				"受控浮游炮从自身位置发射尤里阵营子弹"
+			)
+			_check(
+				controlled_projectile.velocity.normalized().dot(
+					(orbit_simulation.right.pos - controlled_cannon_position).normalized()
+				) > 0.98,
+				"受控浮游炮改为瞄准原主人阵营"
+			)
+		orbit_cannon.pos = orbit_simulation.left.pos + Vector2.RIGHT * (
+			module.settingf("control_range") + 200.0
+		)
+		orbit_simulation.right.pos = Vector2(590.0, 590.0)
+		orbit_simulation.right_ability.on_step(
+			orbit_simulation.battle_context,
+			orbit_simulation.right,
+			orbit_simulation.left,
+			1,
+			0.0
+		)
+		orbit_simulation.left_ability.activate(
+			orbit_simulation.battle_context,
+			orbit_simulation.left,
+			orbit_simulation.right,
+			0
+		)
+		_check(
+			orbit_cannon.owner_side == 0
+				and int(orbit_simulation.left_ability.call("controlled_count")) == 1,
+			"受控物脱离心灵控制范围后阵营和永久控制记录都不复原"
+		)
+		orbit_cannon.process_step(orbit_simulation.battle_context, 0.0)
+		_check(is_equal_approx(
+			orbit_cannon.pos.distance_to(orbit_simulation.left.pos),
+			native_orbit_radius
+		), "脱离控制范围后浮游炮仍回到尤里球的原生轨道")
+		var offset_before_rotation: Vector2 = orbit_cannon.pos - orbit_simulation.left.pos
+		orbit_simulation.right_ability.before_motion(
+			orbit_simulation.battle_context,
+			orbit_simulation.right,
+			orbit_simulation.left,
+			1,
+			0.25
+		)
+		orbit_cannon.process_step(orbit_simulation.battle_context, 0.25)
+		var offset_after_rotation: Vector2 = orbit_cannon.pos - orbit_simulation.left.pos
+		_check(is_equal_approx(offset_after_rotation.length(), native_orbit_radius), "受控浮游炮旋转时保持原轨道半径")
+		_check(not offset_after_rotation.is_equal_approx(offset_before_rotation), "受控浮游炮继续使用原本的环绕速度与运动方式")
+		_check(
+			orbit_cannon.pos.distance_to(orbit_simulation.right.pos) > native_orbit_radius * 2.0,
+			"受控浮游炮不再围绕原主人"
+		)
+
+	var clone_collision_simulation := BattleSimulationScript.new(20260928, "yuri", "splitter")
+	clone_collision_simulation.left.pos = Vector2(190.0, 320.0)
+	clone_collision_simulation.right.pos = Vector2(520.0, 320.0)
+	clone_collision_simulation.left.velocity = Vector2.ZERO
+	clone_collision_simulation.right.velocity = Vector2.ZERO
+	clone_collision_simulation.right_ability.activate(
+		clone_collision_simulation.battle_context,
+		clone_collision_simulation.right,
+		clone_collision_simulation.left,
+		1
+	)
+	var duel_clones: Array[BallEntity] = clone_collision_simulation.entity_list(1, "splitter_clone")
+	_check(duel_clones.size() >= 2, "尤里控制碰撞测试生成两个敌方分身")
+	if duel_clones.size() >= 2:
+		var controlled_clone: BallEntity = duel_clones[0]
+		var original_clone: BallEntity = duel_clones[1]
+		controlled_clone.pos = Vector2(250.0, 320.0)
+		original_clone.pos = Vector2(620.0, 320.0)
+		clone_collision_simulation.left_ability.activate(
+			clone_collision_simulation.battle_context,
+			clone_collision_simulation.left,
+			clone_collision_simulation.right,
+			0
+		)
+		_check(
+			controlled_clone.owner_side == 0 and original_clone.owner_side == 1,
+			"尤里只永久控制范围内的一个分身"
+		)
+		controlled_clone.pos = Vector2(320.0, 320.0)
+		original_clone.pos = Vector2(324.0, 320.0)
+		controlled_clone.velocity = Vector2(120.0, 0.0)
+		original_clone.velocity = Vector2(-120.0, 0.0)
+		controlled_clone.set("_contact_timer", 0.0)
+		original_clone.set("_contact_timer", 0.0)
+		var controlled_hp_before: float = float(controlled_clone.get("hp"))
+		var original_hp_before: float = float(original_clone.get("hp"))
+		clone_collision_simulation.right_ability.after_entities_step(
+			clone_collision_simulation.battle_context,
+			clone_collision_simulation.right,
+			clone_collision_simulation.left,
+			1,
+			0.0
+		)
+		_check(
+			controlled_clone.pos.distance_to(original_clone.pos)
+				>= controlled_clone.radius + original_clone.radius - 0.001,
+			"被控制分身与原阵营分身仍会发生实体碰撞并分离"
+		)
+		_check(
+			is_equal_approx(
+				controlled_hp_before - float(controlled_clone.get("hp")),
+				float(original_clone.call("collision_damage"))
+			) and is_equal_approx(
+				original_hp_before - float(original_clone.get("hp")),
+				float(controlled_clone.call("collision_damage"))
+			),
+			"倒戈分身与原阵营分身碰撞时互相正确扣血"
+		)
+		_check(
+			int(clone_collision_simulation.stats.get("clone_duel_hits", 0)) == 1,
+			"倒戈分身碰撞只结算一次"
+		)
+
+	var deterministic_a := BattleSimulationScript.new(20260925, "yuri", "splitter")
+	var deterministic_b := BattleSimulationScript.new(20260925, "yuri", "splitter")
+	_run_to_finish(deterministic_a, false)
+	_run_to_finish(deterministic_b, false)
+	_check(deterministic_a.snapshot() == deterministic_b.snapshot(), "尤里球的目标选择与所有权转移可按种子完全重放")
 
 func _prepare_contact(simulation: BattleSimulation) -> void:
 	var minimum_distance := simulation.left.radius + simulation.right.radius
@@ -387,6 +1003,48 @@ func _check_splitter_clone_bodies() -> void:
 	_check(clone.removed and is_zero_approx(float(clone.get("hp"))), "分身生命耗尽后独立死亡")
 	simulation.step(0.0)
 	_check(not simulation.entities.has(clone), "死亡分身由通用实体生命周期清理")
+
+	var mirror_simulation := BattleSimulationScript.new(20260929, "splitter", "splitter")
+	mirror_simulation.left_ability.activate(
+		mirror_simulation.battle_context,
+		mirror_simulation.left,
+		mirror_simulation.right,
+		0
+	)
+	mirror_simulation.right_ability.activate(
+		mirror_simulation.battle_context,
+		mirror_simulation.right,
+		mirror_simulation.left,
+		1
+	)
+	var left_clones: Array[BallEntity] = mirror_simulation.entity_list(0, "splitter_clone")
+	var right_clones: Array[BallEntity] = mirror_simulation.entity_list(1, "splitter_clone")
+	_check(left_clones.size() >= 2 and right_clones.size() >= 2, "双分身球碰撞测试生成两组独立分身")
+	if left_clones.size() >= 2 and right_clones.size() >= 2:
+		left_clones[0].pos = Vector2(300.0, 320.0)
+		right_clones[0].pos = Vector2(304.0, 320.0)
+		left_clones[1].pos = Vector2(100.0, 100.0)
+		right_clones[1].pos = Vector2(600.0, 500.0)
+		left_clones[0].set("_contact_timer", 0.0)
+		right_clones[0].set("_contact_timer", 0.0)
+		mirror_simulation.left_ability.after_entities_step(
+			mirror_simulation.battle_context,
+			mirror_simulation.left,
+			mirror_simulation.right,
+			0,
+			0.0
+		)
+		mirror_simulation.right_ability.after_entities_step(
+			mirror_simulation.battle_context,
+			mirror_simulation.right,
+			mirror_simulation.left,
+			1,
+			0.0
+		)
+		_check(
+			int(mirror_simulation.stats.get("clone_duel_hits", 0)) == 1,
+			"两颗分身球各自生成的分身仍跨生成组碰撞且只结算一次"
+		)
 
 func _check_splitter_attack_reception() -> void:
 	var projectile_simulation := BattleSimulationScript.new(20260902, "splitter", "replicator")

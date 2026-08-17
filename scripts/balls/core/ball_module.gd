@@ -15,6 +15,7 @@ var sound_kind := "impact"
 var sort_order := 0
 var ability_script: Script
 var visual_script: Script
+var _audio_samples: Dictionary = {}
 var _setting_specs := {}
 var _setting_values := {}
 
@@ -35,6 +36,10 @@ func _init(config: Dictionary = {}, behavior: Script = null, visual: Script = nu
 	sort_order = int(config.get("sort_order", 0))
 	ability_script = behavior
 	visual_script = visual
+	var configured_audio_samples = config.get("audio_samples", {})
+	if configured_audio_samples is Dictionary:
+		for event_kind in configured_audio_samples:
+			_audio_samples[String(event_kind)] = configured_audio_samples[event_kind]
 	_register_setting("max_hp", {
 		"label": "生命值", "group": "基础属性", "default": max_hp,
 		"min": 1.0, "max": 10000.0, "step": 1.0, "kind": "float", "order": 10,
@@ -125,6 +130,9 @@ func default_settings_snapshot() -> Dictionary:
 		result[key] = _setting_specs[key]["default"]
 	return result
 
+func audio_samples() -> Dictionary:
+	return _audio_samples.duplicate()
+
 func _register_setting(key: String, raw_spec) -> void:
 	assert(not key.is_empty() and not _setting_specs.has(key), "%s has duplicate setting %s" % [id, key])
 	assert(raw_spec is Dictionary, "%s setting %s must be a dictionary" % [id, key])
@@ -164,4 +172,9 @@ func validation_errors() -> PackedStringArray:
 		errors.append("%s has no visual script" % id)
 	elif not visual_script.new() is BallVisual:
 		errors.append("%s visual script must extend BallVisual" % id)
+	for event_kind in _audio_samples:
+		if String(event_kind).is_empty():
+			errors.append("%s has an empty audio event key" % id)
+		elif not _audio_samples[event_kind] is AudioStream:
+			errors.append("%s audio event %s must provide an AudioStream" % [id, event_kind])
 	return errors

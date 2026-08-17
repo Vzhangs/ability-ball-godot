@@ -10,6 +10,15 @@ var _player: AudioStreamPlayer
 var _playback: AudioStreamGeneratorPlayback
 var _voices: Array[Dictionary] = []
 var _noise := RandomNumberGenerator.new()
+var _sample_streams: Dictionary = {}
+var _sample_players: Dictionary = {}
+
+func configure_samples(samples: Dictionary) -> void:
+	_sample_streams.clear()
+	for event_kind in samples:
+		var stream = samples[event_kind]
+		if stream is AudioStream:
+			_sample_streams[String(event_kind)] = stream
 
 func _ready() -> void:
 	process_priority = AUDIO_PROCESS_PRIORITY
@@ -34,12 +43,19 @@ func _exit_tree() -> void:
 func shutdown() -> void:
 	set_process(false)
 	_voices.clear()
+	for player in _sample_players.values():
+		if player is AudioStreamPlayer:
+			player.stop()
+	_sample_players.clear()
 	_playback = null
 	if _player != null:
 		_player.stop()
 		_player.stream = null
 
 func play_event(kind: String, strength: float = 1.0) -> void:
+	if _sample_streams.has(kind):
+		_play_sample_event(kind, strength)
+		return
 	var voice := event_profile(kind, strength)
 	if voice.is_empty():
 		return
@@ -135,12 +151,48 @@ func event_profile(kind: String, strength: float = 1.0) -> Dictionary:
 			voice["frequency_end"] = 82.0
 			voice["wave"] = "saw"
 			voice["noise"] = 0.09
+		"blade_slash":
+			voice["duration"] = 0.17
+			voice["frequency"] = 1860.0
+			voice["frequency_end"] = 410.0
+			voice["wave"] = "saw"
+			voice["noise"] = 0.075
+			voice["attack"] = 0.0006
+			voice["transient"] = 0.34
+			voice["transient_duration"] = 0.005
+		"wind_cast":
+			voice["duration"] = 0.38
+			voice["frequency"] = 540.0
+			voice["frequency_end"] = 1320.0
+			voice["wave"] = "triangle"
+			voice["noise"] = 0.14
+			voice["attack"] = 0.012
+			voice["transient"] = 0.16
+			voice["transient_duration"] = 0.016
+		"wind_absorb":
+			voice["duration"] = 0.12
+			voice["frequency"] = 1480.0
+			voice["frequency_end"] = 245.0
+			voice["wave"] = "square"
+			voice["noise"] = 0.21
+			voice["attack"] = 0.0008
+			voice["transient"] = 0.28
+			voice["transient_duration"] = 0.006
+		"psychic_pulse":
+			voice["duration"] = 0.44
+			voice["frequency"] = 285.0
+			voice["frequency_end"] = 1380.0
+			voice["wave"] = "triangle"
+			voice["noise"] = 0.065
+			voice["attack"] = 0.01
+			voice["transient"] = 0.12
+			voice["transient_duration"] = 0.018
 		_:
 			return {}
 	return voice
 
 func supports_event(kind: String) -> bool:
-	return kind in [
+	return _sample_streams.has(kind) or kind in [
 		"impact",
 		"body_impact",
 		"volley",
@@ -151,7 +203,31 @@ func supports_event(kind: String) -> bool:
 		"judgment",
 		"track",
 		"blood",
+		"blade_slash",
+		"wind_cast",
+		"wind_absorb",
+		"psychic_pulse",
 	]
+
+func has_sample_event(kind: String) -> bool:
+	return _sample_streams.has(kind)
+
+func sample_event_duration(kind: String) -> float:
+	var stream = _sample_streams.get(kind)
+	return stream.get_length() if stream is AudioStream else 0.0
+
+func _play_sample_event(kind: String, strength: float) -> void:
+	if DisplayServer.get_name() == "headless" or not is_inside_tree():
+		return
+	var player := _sample_players.get(kind) as AudioStreamPlayer
+	if player == null:
+		player = AudioStreamPlayer.new()
+		player.stream = _sample_streams[kind]
+		player.max_polyphony = 4
+		add_child(player)
+		_sample_players[kind] = player
+	player.volume_db = linear_to_db(lerpf(0.72, 1.0, clampf(strength, 0.0, 1.0)))
+	player.play()
 
 func _process(_delta: float) -> void:
 	if _playback == null:

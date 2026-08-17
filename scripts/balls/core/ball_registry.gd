@@ -8,6 +8,7 @@ static var _modules := {}
 static var _ordered_modules: Array = []
 static var _errors := PackedStringArray()
 static var _runtime_settings := {}
+static var _audio_samples := {}
 
 static func configure_settings(settings: Dictionary) -> void:
 	_runtime_settings = settings.duplicate(true)
@@ -20,11 +21,16 @@ static func settings_snapshot() -> Dictionary:
 		result[module.id] = module.settings_snapshot()
 	return result
 
+static func audio_samples() -> Dictionary:
+	_ensure_loaded()
+	return _audio_samples.duplicate()
+
 static func reload() -> void:
 	_loaded = false
 	_modules.clear()
 	_ordered_modules.clear()
 	_errors.clear()
+	_audio_samples.clear()
 	_ensure_loaded()
 
 static func ids() -> Array[String]:
@@ -80,6 +86,11 @@ static func _ensure_loaded() -> void:
 		if _modules.has(module.id):
 			_errors.append("duplicate ball id: %s" % module.id)
 			continue
+		for event_kind in module.audio_samples():
+			if _audio_samples.has(event_kind):
+				_errors.append("duplicate sampled audio event: %s" % event_kind)
+				continue
+			_audio_samples[event_kind] = module.audio_samples()[event_kind]
 		_modules[module.id] = module
 		_ordered_modules.append(module)
 	_ordered_modules.sort_custom(func(left, right): return left.sort_order < right.sort_order)

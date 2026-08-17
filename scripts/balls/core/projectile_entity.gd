@@ -75,6 +75,10 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 func is_absorbable() -> bool:
 	return true
 
+## Projectiles can be captured or absorbed, but allegiance control never reflects them.
+func can_transfer_ownership() -> bool:
+	return false
+
 func absorption_visual_color() -> Color:
 	return color
 

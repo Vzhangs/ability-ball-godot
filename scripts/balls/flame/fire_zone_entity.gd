@@ -20,8 +20,10 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	var alpha := clampf(remaining / _duration, 0.0, 1.0)
 	var position := screen_position(context)
 	var draw_radius := radius * scale_factor
-	canvas.draw_circle(position, draw_radius, Color(1.0, 0.19, 0.02, alpha * 0.19))
-	canvas.draw_circle(position, draw_radius * 0.65, Color(1.0, 0.68, 0.08, alpha * 0.18))
+	var outer_color := ownership_visual_color(Color(1.0, 0.19, 0.02, alpha * 0.19))
+	var inner_color := ownership_visual_color(Color(1.0, 0.68, 0.08, alpha * 0.18))
+	canvas.draw_circle(position, draw_radius, outer_color)
+	canvas.draw_circle(position, draw_radius * 0.65, inner_color)
 
 func is_absorbable() -> bool:
 	return true
@@ -30,4 +32,4 @@ func absorption_radius() -> float:
 	return minf(_absorption_radius_cap, radius * _absorption_radius_ratio)
 
 func absorption_visual_color() -> Color:
-	return Color("ff7a24")
+	return ownership_visual_color(Color("ff7a24"))

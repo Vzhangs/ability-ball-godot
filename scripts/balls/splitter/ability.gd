@@ -3,6 +3,7 @@ extends BallAbility
 const CloneEntity := preload("res://scripts/balls/splitter/clone_entity.gd")
 
 var _next_clone_id := 0
+var _spawned_clones: Array[WeakRef] = []
 
 func max_clones() -> int:
 	return settingi("max_clones")
@@ -34,11 +35,14 @@ func after_damage_dealt(battle, fighter, _opponent, amount: float) -> void:
 		_emit_split_event(battle, 1)
 
 func after_entities_step(battle, _fighter, _opponent, side: int, _delta: float) -> void:
-	var clones: Array[BallEntity] = battle.entities(side, "splitter_clone")
+	var clones: Array[BallEntity] = _active_spawned_clones()
 	_resolve_local_clone_collisions(battle, clones)
 	if side == 0:
-		_resolve_hostile_clone_collisions(battle, clones, battle.entities(1, "splitter_clone"))
-	clones = battle.entities(side, "splitter_clone")
+		var foreign_clones: Array[BallEntity] = []
+		for candidate: BallEntity in battle.entities(-1, "splitter_clone"):
+			if candidate not in clones:
+				foreign_clones.append(candidate)
+		_resolve_hostile_clone_collisions(battle, clones, foreign_clones)
 	clones.sort_custom(func(left: BallEntity, right: BallEntity) -> bool:
 		return int(left.call("clone_id")) < int(right.call("clone_id"))
 	)
@@ -57,7 +61,7 @@ func _spawn_clone(battle, fighter, side: int) -> void:
 		settingf("clone_spawn_speed_min"),
 		settingf("clone_spawn_speed_max")
 	) + fighter.velocity * settingf("clone_owner_velocity_ratio")
-	battle.add_entity(CloneEntity.new(
+	var clone: BallEntity = CloneEntity.new(
 		side,
 		spawn_position,
 		spawn_velocity,
@@ -75,9 +79,21 @@ func _spawn_clone(battle, fighter, side: int) -> void:
 			"wall_bounce_spread": settingf("clone_wall_bounce_spread"),
 			"target_velocity_ratio": settingf("clone_target_velocity_ratio"),
 		}
-	))
+	)
+	battle.add_entity(clone)
+	_spawned_clones.append(weakref(clone))
 	_next_clone_id += 1
 	battle.record_stat("clones_spawned")
+
+func _active_spawned_clones() -> Array[BallEntity]:
+	var result: Array[BallEntity] = []
+	for index in range(_spawned_clones.size() - 1, -1, -1):
+		var clone: BallEntity = _spawned_clones[index].get_ref()
+		if clone == null or clone.removed:
+			_spawned_clones.remove_at(index)
+			continue
+		result.append(clone)
+	return result
 
 func _emit_split_event(battle, spawn_count: int) -> void:
 	battle.emit_combat_event("split", minf(0.78, 0.5 + float(spawn_count) * 0.08))

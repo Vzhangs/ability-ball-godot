@@ -69,6 +69,7 @@ func _ready() -> void:
 		return
 	battle_logger = BattleLoggerScript.new()
 	procedural_audio = ProceduralAudioScript.new()
+	procedural_audio.configure_samples(BallRegistry.audio_samples())
 	add_child(procedural_audio)
 	_build_background()
 	_build_header()

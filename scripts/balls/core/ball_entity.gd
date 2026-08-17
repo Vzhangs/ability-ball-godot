@@ -4,6 +4,8 @@ extends RefCounted
 ## Stable world-entity contract used by ball modules.
 ## Concrete entities own their behavior and rendering; the battle core only owns lifecycle.
 
+const ABOVE_BALL_DRAW_LAYER := 1
+
 var owner_side := -1
 var pos := Vector2.ZERO
 var velocity := Vector2.ZERO
@@ -13,6 +15,7 @@ var removed := false
 var tags := PackedStringArray()
 var draw_layer := 0
 var _capture_disabled := false
+var _ownership_color_override := Color(0.0, 0.0, 0.0, 0.0)
 
 func process_lifetime(delta: float) -> void:
 	if _capture_disabled:
@@ -39,6 +42,10 @@ func draw(_canvas: CanvasItem, _context: BallRenderContext) -> void:
 
 func draw_hud(_canvas: CanvasItem, _health_bar_bounds: Rect2) -> void:
 	pass
+
+## Non-positive layers render below both fighter bodies; positive layers render above them.
+func draws_above_balls() -> bool:
+	return draw_layer >= ABOVE_BALL_DRAW_LAYER
 
 func has_tag(tag: String) -> bool:
 	return tags.has(tag)
@@ -75,6 +82,43 @@ func disable_for_capture() -> bool:
 func is_captured() -> bool:
 	return _capture_disabled
 
+## Generic allegiance-transfer capability used by mind control, hacking, or reflection.
+## The optional anchor lets an entity preserve its native owner-relative behavior after transfer.
+func can_transfer_ownership() -> bool:
+	return owner_side >= 0 and not removed and not is_captured() and is_absorbable()
+
+func transfer_ownership(new_owner_side: int, new_owner_anchor = null) -> bool:
+	if new_owner_side < 0 or new_owner_side == owner_side or not can_transfer_ownership():
+		return false
+	var previous_owner_side := owner_side
+	owner_side = new_owner_side
+	on_ownership_transferred(previous_owner_side, new_owner_side, new_owner_anchor)
+	return true
+
+## Entities that follow or orbit their owner override this hook and update their own anchor.
+## The base contract never inspects a concrete entity type.
+func on_ownership_transferred(
+	_previous_owner_side: int,
+	_new_owner_side: int,
+	_new_owner_anchor
+) -> void:
+	pass
+
+## Optional presentation response for transferred entities. Concrete entity draw methods
+## resolve their native colors through ownership_visual_color(), without knowing the controller.
+func set_ownership_visual_color(color: Color) -> void:
+	_ownership_color_override = color
+
+func ownership_visual_color(native_color: Color) -> Color:
+	if _ownership_color_override.a <= 0.0:
+		return native_color
+	return Color(
+		_ownership_color_override.r,
+		_ownership_color_override.g,
+		_ownership_color_override.b,
+		native_color.a
+	)
+
 func attraction_position() -> Vector2:
 	return pos
 
@@ -82,7 +126,7 @@ func absorption_radius() -> float:
 	return radius
 
 func absorption_visual_color() -> Color:
-	return Color.WHITE
+	return ownership_visual_color(Color.WHITE)
 
 func absorb(_battle, _absorber_side: int, _center: Vector2) -> bool:
 	if not is_absorbable() or removed:

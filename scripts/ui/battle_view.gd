@@ -11,6 +11,12 @@ const HEALTH_BAR_WIDTH := 238.0
 const HEALTH_BAR_HEIGHT := 16.0
 const HEALTH_VALUE_FONT_SIZE := 21
 const HEALTH_NAME_FONT_SIZE := 17
+const BALL_HEALTH_FONT_SCALE := 0.78
+const BALL_HEALTH_FONT_MIN_SIZE := 15
+const BALL_HEALTH_FONT_MAX_SIZE := 30
+const BALL_HEALTH_OUTLINE_WIDTH := 2.0
+const BALL_HEALTH_TEXT_ALPHA := 0.68
+const BALL_HEALTH_OUTLINE_ALPHA := 0.54
 const HEALTH_PANEL_BOTTOM := 50.0
 const HUD_ARENA_GAP := 20.0
 
@@ -105,11 +111,12 @@ func _draw() -> void:
 	_draw_background_grid()
 	_draw_beams()
 	_draw_trails()
-	_draw_entities()
+	_draw_entities(false)
 	_draw_underlay(simulation.left, left_visual)
 	_draw_underlay(simulation.right, right_visual)
 	_draw_ball(simulation.left, left_visual)
 	_draw_ball(simulation.right, right_visual)
+	_draw_entities(true)
 	_draw_impact_rings()
 	_draw_particles()
 	_draw_floating_texts()
@@ -192,7 +199,7 @@ func _draw_trail(fighter: BattleSimulation.FighterState, visual: BallVisual) -> 
 		color.a = progress * visual.trail_alpha()
 		draw_line(_p(fighter.trail[index - 1]), _p(fighter.trail[index]), color, fighter.radius * 0.52 * progress * visual.trail_width_multiplier() * _scale_factor(), true)
 
-func _draw_entities() -> void:
+func _draw_entities(above_balls: bool) -> void:
 	var ordered := simulation.entities.duplicate()
 	ordered.sort_custom(func(left: BallEntity, right: BallEntity): return left.draw_layer < right.draw_layer)
 	var context := BallRenderContext.new(
@@ -206,8 +213,9 @@ func _draw_entities() -> void:
 		simulation.count_entities
 	)
 	for entity in ordered:
-		if not entity.removed:
-			entity.draw(self, context)
+		if entity.removed or entity.draws_above_balls() != above_balls:
+			continue
+		entity.draw(self, context)
 
 func _visual_context(fighter: BattleSimulation.FighterState) -> Dictionary:
 	return {
@@ -233,8 +241,34 @@ func _draw_ball(fighter: BattleSimulation.FighterState, visual: BallVisual) -> v
 	_draw_center_value(position, str(int(ceil(fighter.hp))), radius, Color.WHITE)
 
 func _draw_center_value(position: Vector2, text: String, radius: float, color: Color) -> void:
-	var font_size := clampi(int(radius * 0.56), 12, 24)
-	draw_string(_font, position + Vector2(-radius, font_size * 0.34), text, HORIZONTAL_ALIGNMENT_CENTER, radius * 2.0, font_size, color)
+	var font_size := clampi(
+		int(radius * BALL_HEALTH_FONT_SCALE),
+		BALL_HEALTH_FONT_MIN_SIZE,
+		BALL_HEALTH_FONT_MAX_SIZE
+	)
+	var baseline := position + Vector2(-radius, font_size * 0.34)
+	var outline_color := Color(0.005, 0.008, 0.012, BALL_HEALTH_OUTLINE_ALPHA)
+	var text_color := Color(color.r, color.g, color.b, color.a * BALL_HEALTH_TEXT_ALPHA)
+	for outline_direction in [
+		Vector2.LEFT,
+		Vector2.RIGHT,
+		Vector2.UP,
+		Vector2.DOWN,
+		Vector2(-1.0, -1.0).normalized(),
+		Vector2(1.0, -1.0).normalized(),
+		Vector2(-1.0, 1.0).normalized(),
+		Vector2(1.0, 1.0).normalized(),
+	]:
+		draw_string(
+			_font,
+			baseline + outline_direction * BALL_HEALTH_OUTLINE_WIDTH,
+			text,
+			HORIZONTAL_ALIGNMENT_CENTER,
+			radius * 2.0,
+			font_size,
+			outline_color
+		)
+	draw_string(_font, baseline, text, HORIZONTAL_ALIGNMENT_CENTER, radius * 2.0, font_size, text_color)
 
 func _draw_impact_rings() -> void:
 	for ring in simulation.impact_rings:

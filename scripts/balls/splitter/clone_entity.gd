@@ -75,11 +75,12 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	var scale_factor := context.scale_factor
 	var position := screen_position(context)
 	var draw_radius := radius * scale_factor
-	var body_color := _color
+	var body_color := ownership_visual_color(_color)
+	var accent_color := ownership_visual_color(_accent)
 	body_color.a = 0.86 if not is_captured() else 0.62
-	canvas.draw_circle(position, draw_radius * 1.28, Color(_accent.r, _accent.g, _accent.b, 0.2))
+	canvas.draw_circle(position, draw_radius * 1.28, Color(accent_color.r, accent_color.g, accent_color.b, 0.2))
 	canvas.draw_circle(position, draw_radius, body_color)
-	canvas.draw_circle(position, draw_radius, _accent, false, maxf(1.0, 1.4 * scale_factor))
+	canvas.draw_circle(position, draw_radius, accent_color, false, maxf(1.0, 1.4 * scale_factor))
 	canvas.draw_line(
 		position + Vector2(-draw_radius * 0.5, -draw_radius * 0.22),
 		position + Vector2(draw_radius * 0.5, draw_radius * 0.22),
@@ -95,7 +96,7 @@ func draw_hud(canvas: CanvasItem, health_bar_bounds: Rect2) -> void:
 		return
 	var bounds := mini_health_bar_bounds(health_bar_bounds)
 	canvas.draw_rect(bounds.grow(1.0), Color(0.01, 0.035, 0.05, 0.92))
-	canvas.draw_rect(Rect2(bounds.position, Vector2(bounds.size.x * hp / max_hp, bounds.size.y)), _accent)
+	canvas.draw_rect(Rect2(bounds.position, Vector2(bounds.size.x * hp / max_hp, bounds.size.y)), ownership_visual_color(_accent))
 	canvas.draw_rect(bounds, Color(0.82, 0.98, 1.0, 0.72), false, 1.0)
 
 func mini_health_bar_bounds(main_health_bar_bounds: Rect2) -> Rect2:
@@ -150,7 +151,7 @@ func is_absorbable() -> bool:
 	return true
 
 func absorption_visual_color() -> Color:
-	return _color
+	return ownership_visual_color(_color)
 
 func _normalize_speed() -> void:
 	if velocity.length_squared() <= 0.001:

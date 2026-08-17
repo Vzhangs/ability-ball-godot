@@ -15,7 +15,9 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	var position := screen_position(context)
 	var target := screen_position(context, fighter.pos)
 	var alpha := clampf(remaining / _duration, 0.0, 1.0)
-	canvas.draw_line(position, target, Color(0.59, 0.89, 1.0, alpha * 0.72), 2.0, true)
+	var line_color := ownership_visual_color(Color(0.59, 0.89, 1.0, alpha * 0.72))
+	var anchor_color := ownership_visual_color(Color(0.18, 1.0, 0.38, alpha))
+	canvas.draw_line(position, target, line_color, 2.0, true)
 	var inward := (context.viewport_size * 0.5 - position).normalized()
 	var tangent := Vector2(-inward.y, inward.x)
 	var polygon := PackedVector2Array([
@@ -23,10 +25,10 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 		position - inward * 6.0 + tangent * 8.0,
 		position - inward * 6.0 - tangent * 8.0,
 	])
-	canvas.draw_colored_polygon(polygon, Color(0.18, 1.0, 0.38, alpha))
+	canvas.draw_colored_polygon(polygon, anchor_color)
 
 func is_absorbable() -> bool:
 	return true
 
 func absorption_visual_color() -> Color:
-	return Color(0.18, 1.0, 0.38)
+	return ownership_visual_color(Color(0.18, 1.0, 0.38))
