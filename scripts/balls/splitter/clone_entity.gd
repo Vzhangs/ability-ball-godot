@@ -57,8 +57,29 @@ func clone_id() -> int:
 func health_bar_index() -> int:
 	return _health_bar_index
 
-func collision_damage() -> float:
+func entity_contact_damage() -> float:
 	return _impact_damage
+
+func participates_in_entity_collision() -> bool:
+	return not removed and not is_captured()
+
+func entity_collision_inverse_mass() -> float:
+	return 1.0
+
+func entity_contact_color() -> Color:
+	return ownership_visual_color(_accent)
+
+func can_resolve_entity_contact(other: BallEntity) -> bool:
+	return (
+		participates_in_entity_collision()
+		and other != null
+		and other.owner_side >= 0
+		and other.owner_side != owner_side
+		and _contact_timer <= 0.0
+	)
+
+func begin_entity_contact(_other: BallEntity) -> void:
+	_contact_timer = _contact_interval
 
 func set_health_bar_index(index: int) -> void:
 	_health_bar_index = maxi(0, index)
@@ -215,8 +236,12 @@ func _resolve_fighter_collision(battle) -> void:
 	battle.spawn_particles(pos + normal * radius, _accent, 4, 92.0)
 	battle.emit_combat_event("clone_impact", 0.42)
 
-func resolve_clone_collision(battle, other: BallEntity) -> void:
-	if other == self or removed or other.removed:
+func resolve_entity_collision(battle, other: BallEntity) -> void:
+	if (
+		other == self
+		or not participates_in_entity_collision()
+		or not other.participates_in_entity_collision()
+	):
 		return
 	var offset: Vector2 = other.pos - pos
 	var minimum_distance: float = radius + other.radius
@@ -225,25 +250,39 @@ func resolve_clone_collision(battle, other: BallEntity) -> void:
 		return
 	var normal := offset / distance if distance > 0.001 else Vector2.RIGHT
 	var overlap := minimum_distance - maxf(distance, 0.001)
-	pos -= normal * overlap * 0.5
-	other.pos += normal * overlap * 0.5
+	var own_inverse_mass := maxf(0.0, entity_collision_inverse_mass())
+	var other_inverse_mass := maxf(0.0, other.entity_collision_inverse_mass())
+	var total_inverse_mass := own_inverse_mass + other_inverse_mass
+	if total_inverse_mass > 0.0:
+		pos -= normal * overlap * own_inverse_mass / total_inverse_mass
+		other.pos += normal * overlap * other_inverse_mass / total_inverse_mass
 	var relative_speed: float = (other.velocity - velocity).dot(normal)
-	if relative_speed < 0.0:
-		var impulse: float = -relative_speed
-		velocity -= normal * impulse
-		other.velocity += normal * impulse
-	if owner_side == other.owner_side or _contact_timer > 0.0 or not bool(other.call("can_receive_clone_contact")):
+	if relative_speed < 0.0 and total_inverse_mass > 0.0:
+		var impulse: float = -2.0 * relative_speed / total_inverse_mass
+		velocity -= normal * impulse * own_inverse_mass
+		other.velocity += normal * impulse * other_inverse_mass
+	if not can_resolve_entity_contact(other) or not other.can_resolve_entity_contact(self):
 		return
-	_contact_timer = _contact_interval
-	other.call("begin_clone_contact")
-	var other_damage := float(other.call("collision_damage"))
-	receive_collision_damage(battle, other_damage)
-	other.call("receive_collision_damage", battle, _impact_damage)
-	battle.record_stat("clone_duel_hits")
+	var outgoing_damage := entity_contact_damage()
+	var incoming_damage := other.entity_contact_damage()
+	begin_entity_contact(other)
+	other.begin_entity_contact(self)
+	var damage_to_other: float = battle.damage_entity(
+		other,
+		outgoing_damage,
+		entity_contact_color(),
+		owner_side
+	)
+	var damage_to_self: float = battle.damage_entity(
+		self,
+		incoming_damage,
+		other.entity_contact_color(),
+		other.owner_side
+	)
+	if damage_to_other <= 0.0 and damage_to_self <= 0.0:
+		return
+	battle.record_stat("clone_entity_contact_hits")
+	var contact_position := pos + normal * radius
+	battle.spawn_ring(contact_position, _accent, 4.0, 32.0, 0.2)
+	battle.spawn_particles(contact_position, _accent, 4, 92.0)
 	battle.emit_combat_event("clone_impact", 0.36)
-
-func can_receive_clone_contact() -> bool:
-	return not removed and _contact_timer <= 0.0
-
-func begin_clone_contact() -> void:
-	_contact_timer = _contact_interval

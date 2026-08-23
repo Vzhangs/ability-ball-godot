@@ -18,9 +18,8 @@ func on_battle_started(_battle, fighter, _opponent, _side: int) -> void:
 func speed_multiplier(_battle, _fighter, _opponent, _side: int) -> float:
 	return _speed_multiplier
 
-func contact_damage(_battle, fighter, _opponent) -> float:
-	var speed_ratio: float = fighter.velocity.length() / maxf(0.001, fighter.base_speed)
-	return settingf("body_impact_damage") * speed_ratio
+func contact_damage(_battle, _fighter, _opponent) -> float:
+	return settingf("body_impact_damage") * _speed_multiplier
 
 func on_step(battle, _fighter, _opponent, _side: int, delta: float) -> void:
 	for index in range(_pending_waves.size() - 1, -1, -1):

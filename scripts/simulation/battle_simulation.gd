@@ -2,6 +2,7 @@ class_name BattleSimulation
 extends RefCounted
 
 const BallBattleContextScript := preload("res://scripts/balls/core/ball_battle_context.gd")
+const FighterDeathEffectEntityScript := preload("res://scripts/balls/core/fighter_death_effect_entity.gd")
 const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
 
 const DEFAULT_ARENA_SIZE := GlobalGameSettingsScript.DEFAULT_ARENA_SIZE
@@ -16,6 +17,9 @@ const TRAIL_INTERVAL := 0.055
 const ABILITY_TIMER_OFFSET := 0.6
 const LEFT_SPAWN_RATIO := Vector2(0.25, 0.5)
 const RIGHT_SPAWN_RATIO := Vector2(0.75, 0.5)
+const WALL_IMPACT_REFERENCE_SPEED := 720.0
+const WALL_IMPACT_MIN_STRENGTH := 0.12
+const WALL_IMPACT_MAX_STRENGTH := 0.28
 
 class FighterState:
 	var id := ""
@@ -87,6 +91,7 @@ var recovery_scale := RECOVERY_SCALE
 var contact_cooldown := CONTACT_COOLDOWN
 var collision_impulse := COLLISION_IMPULSE
 var trail_interval := TRAIL_INTERVAL
+var death_effect_duration := GlobalGameSettingsScript.DEFAULT_RESULT_REVEAL_DELAY
 
 var impact_rings: Array[Dictionary] = []
 var particles: Array[Dictionary] = []
@@ -210,6 +215,7 @@ func step(delta: float = FIXED_STEP) -> void:
 	_update_ability(left, right, left_ability, 0, delta)
 	_update_ability(right, left, right_ability, 1, delta)
 	_update_entities(delta)
+	_resolve_fighter_entity_collisions()
 	left_ability.after_entities_step(battle_context, left, right, 0, delta)
 	right_ability.after_entities_step(battle_context, right, left, 1, delta)
 	_update_trails(delta)
@@ -243,25 +249,58 @@ func _update_fighter(fighter: FighterState, opponent: FighterState, ability: Bal
 
 func _resolve_wall(fighter: FighterState) -> void:
 	var bounced := false
+	var hit_horizontal_wall := false
+	var hit_vertical_wall := false
+	var wall_x := 0.0
+	var wall_y := 0.0
 	if fighter.pos.x < fighter.radius:
 		fighter.pos.x = fighter.radius
 		fighter.velocity.x = absf(fighter.velocity.x)
 		bounced = true
+		hit_vertical_wall = true
+		wall_x = 0.0
 	elif fighter.pos.x > _arena_size.x - fighter.radius:
 		fighter.pos.x = _arena_size.x - fighter.radius
 		fighter.velocity.x = -absf(fighter.velocity.x)
 		bounced = true
+		hit_vertical_wall = true
+		wall_x = _arena_size.x
 	if fighter.pos.y < fighter.radius:
 		fighter.pos.y = fighter.radius
 		fighter.velocity.y = absf(fighter.velocity.y)
 		bounced = true
+		hit_horizontal_wall = true
+		wall_y = 0.0
 	elif fighter.pos.y > _arena_size.y - fighter.radius:
 		fighter.pos.y = _arena_size.y - fighter.radius
 		fighter.velocity.y = -absf(fighter.velocity.y)
 		bounced = true
+		hit_horizontal_wall = true
+		wall_y = _arena_size.y
 	if bounced:
 		fighter.velocity = fighter.velocity.rotated(rng.randf_range(-0.035, 0.035))
 		spawn_particles(fighter.pos, fighter.accent, 3, 55.0)
+		var wall_impact_strength := clampf(
+			fighter.velocity.length() / WALL_IMPACT_REFERENCE_SPEED,
+			WALL_IMPACT_MIN_STRENGTH,
+			WALL_IMPACT_MAX_STRENGTH
+		)
+		emit_combat_event("wall_impact", wall_impact_strength)
+		var contact_position := fighter.pos
+		if hit_vertical_wall:
+			contact_position.x = wall_x
+		if hit_horizontal_wall:
+			contact_position.y = wall_y
+		var fighter_side := side_for_fighter(fighter)
+		var wall_ability := _ability_for_fighter(fighter)
+		if wall_ability != null and wall_ability.after_wall_hit(
+			battle_context,
+			fighter,
+			opponent_for_side(fighter_side),
+			fighter_side,
+			contact_position
+		):
+			_record_ability(fighter.id)
 		for effect in fighter.status_effects.duplicate():
 			effect.on_wall_hit(battle_context, fighter)
 
@@ -275,6 +314,9 @@ func _resolve_collision() -> void:
 	var overlap := minimum_distance - distance
 	left.pos -= normal * overlap * 0.5
 	right.pos += normal * overlap * 0.5
+	# Collision separation can push a body past a nearby wall after wall resolution.
+	_clamp_fighter_to_arena(left)
+	_clamp_fighter_to_arena(right)
 	var relative_speed := (right.velocity - left.velocity).dot(normal)
 	if relative_speed < 0.0:
 		var impulse := -relative_speed * collision_impulse
@@ -297,6 +339,77 @@ func _resolve_collision() -> void:
 	spawn_particles(impact, Color("fff0a0"), 10, 150.0)
 	camera_shake = maxf(camera_shake, 5.0)
 
+func _resolve_fighter_entity_collisions() -> void:
+	for entity: BallEntity in entities.duplicate():
+		if (
+			entity.removed
+			or entity.is_captured()
+			or not entity.participates_in_fighter_collision()
+			or entity.owner_side < 0
+			or entity.owner_side > 1
+		):
+			continue
+		var fighter_side := 1 - entity.owner_side
+		_resolve_fighter_entity_collision(
+			fighter_for_side(fighter_side),
+			_ability_for_fighter(fighter_for_side(fighter_side)),
+			fighter_side,
+			entity
+		)
+
+func _resolve_fighter_entity_collision(
+	fighter: FighterState,
+	ability: BallAbility,
+	fighter_side: int,
+	entity: BallEntity
+) -> void:
+	var offset: Vector2 = entity.pos - fighter.pos
+	var minimum_distance := fighter.radius + entity.radius
+	var distance := offset.length()
+	if distance >= minimum_distance:
+		return
+	var normal := offset / distance if distance > 0.001 else fighter.velocity.normalized()
+	if normal.length_squared() <= 0.001:
+		normal = Vector2.RIGHT if fighter_side == 0 else Vector2.LEFT
+	var overlap := minimum_distance - maxf(distance, 0.001)
+	var fighter_inverse_mass := 1.0
+	var entity_inverse_mass := maxf(0.0, entity.fighter_collision_inverse_mass())
+	var total_inverse_mass := fighter_inverse_mass + entity_inverse_mass
+	if total_inverse_mass > 0.0:
+		fighter.pos -= normal * overlap * fighter_inverse_mass / total_inverse_mass
+		entity.pos += normal * overlap * entity_inverse_mass / total_inverse_mass
+		_clamp_fighter_to_arena(fighter)
+	var entity_collision_velocity := (
+		entity.velocity if entity_inverse_mass > 0.0 else Vector2.ZERO
+	)
+	var relative_speed := (entity_collision_velocity - fighter.velocity).dot(normal)
+	if relative_speed < 0.0 and total_inverse_mass > 0.0:
+		var impulse := -2.0 * relative_speed / total_inverse_mass
+		fighter.velocity -= normal * impulse * fighter_inverse_mass
+		entity.velocity += normal * impulse * entity_inverse_mass
+	if ability == null or not entity.can_resolve_fighter_contact(fighter_side):
+		return
+	var fighter_damage := maxf(0.0, entity.entity_contact_damage())
+	var entity_damage := maxf(0.0, ability.contact_damage(battle_context, fighter, entity))
+	var contact_color := entity.entity_contact_color()
+	entity.begin_fighter_contact(fighter_side)
+	var damage_to_entity := (
+		damage_entity(entity, entity_damage, fighter.accent, fighter_side)
+		if entity_damage > 0.0
+		else 0.0
+	)
+	var entity_source := fighter_for_side(entity.owner_side)
+	if fighter_damage > 0.0:
+		damage(fighter, fighter_damage, contact_color, entity_source)
+	ability.after_entity_contact(battle_context, fighter, entity, damage_to_entity)
+	stats["fighter_entity_contact_hits"] = int(stats.get("fighter_entity_contact_hits", 0)) + 1
+	var impact_position := fighter.pos + normal * fighter.radius
+	var impact_strength := clampf(maxf(0.0, -relative_speed) / 360.0, 0.3, 0.9)
+	emit_combat_event("body_impact", impact_strength)
+	spawn_ring(impact_position, contact_color, 5.0, 44.0, 0.24)
+	spawn_particles(impact_position, contact_color, 6, 108.0)
+	camera_shake = maxf(camera_shake, 3.5)
+
 func _update_ability(fighter: FighterState, opponent: FighterState, ability: BallAbility, side: int, delta: float) -> void:
 	ability.on_step(battle_context, fighter, opponent, side, delta)
 	if not ability.automatic_activation_enabled():
@@ -312,6 +425,7 @@ func damage(target: FighterState, amount: float, color: Color, source: FighterSt
 		if effect.blocks_damage(battle_context, target, amount, source):
 			effect.on_damage_blocked(battle_context, target, source, show_text)
 			return 0.0
+	var was_alive := target.hp > 0.0
 	var applied := minf(target.hp, maxf(0.0, amount) * damage_scale)
 	target.hp = maxf(0.0, target.hp - applied)
 	target.hit_flash = 1.0
@@ -325,7 +439,25 @@ func damage(target: FighterState, amount: float, color: Color, source: FighterSt
 		var source_ability: BallAbility = _ability_for_fighter(source)
 		if source_ability != null:
 			source_ability.after_damage_dealt(battle_context, source, target, applied)
+	if was_alive and target.hp <= 0.0:
+		_spawn_fighter_death(target)
 	return applied
+
+func _spawn_fighter_death(fighter: FighterState) -> void:
+	var side := side_for_fighter(fighter)
+	add_entity(FighterDeathEffectEntityScript.new(
+		side,
+		fighter.pos,
+		fighter.radius,
+		fighter.color,
+		fighter.accent,
+		death_effect_duration
+	))
+	emit_combat_event("fighter_death", 1.0)
+	spawn_ring(fighter.pos, Color.WHITE, fighter.radius * 0.35, fighter.radius * 3.8, death_effect_duration * 0.72)
+	spawn_particles(fighter.pos, fighter.accent, 16, 230.0)
+	camera_shake = maxf(camera_shake, 10.0)
+	record_stat("fighter_deaths")
 
 func damage_entity(
 	target: BallEntity,
@@ -359,8 +491,9 @@ func contact_damage_for_side(source_side: int, target) -> float:
 		return 0.0
 	return maxf(0.0, source_ability.contact_damage(battle_context, source, target))
 
-func heal(fighter: FighterState, amount: float) -> float:
-	var applied := minf(amount * recovery_scale, fighter.max_hp - fighter.hp)
+func heal(fighter: FighterState, amount: float, allow_overheal: bool = false) -> float:
+	var scaled_amount := maxf(0.0, amount) * recovery_scale
+	var applied := scaled_amount if allow_overheal else minf(scaled_amount, fighter.max_hp - fighter.hp)
 	if applied <= 0.0:
 		return 0.0
 	fighter.hp += applied
@@ -387,6 +520,13 @@ func _preserves_external_velocity(fighter: FighterState) -> bool:
 		if effect.preserves_external_velocity():
 			return true
 	return false
+
+func movement_control_priority(fighter: FighterState) -> int:
+	var highest_priority := BallStatusEffect.MOVEMENT_CONTROL_PRIORITY_NONE
+	for effect in fighter.status_effects:
+		if not effect.is_expired():
+			highest_priority = maxi(highest_priority, effect.movement_control_priority())
+	return highest_priority
 
 func _update_trails(delta: float) -> void:
 	_trail_timer -= delta
@@ -503,6 +643,13 @@ func apply_status(target: FighterState, effect: BallStatusEffect) -> BallStatusE
 func has_status(target: FighterState, key_prefix: String) -> bool:
 	for effect in target.status_effects:
 		if effect.key.begins_with(key_prefix) and not effect.is_expired():
+			return true
+	return false
+
+func remove_status(target: FighterState, exact_key: String) -> bool:
+	for index in range(target.status_effects.size() - 1, -1, -1):
+		if target.status_effects[index].key == exact_key:
+			target.status_effects.remove_at(index)
 			return true
 	return false
 

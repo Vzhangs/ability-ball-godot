@@ -45,5 +45,24 @@ func contact_damage(_battle, _fighter, _opponent) -> float:
 func after_contact(_battle, _fighter, _opponent, _damage_dealt: float) -> void:
 	pass
 
+## Return true when the wall contact actually activated a ball-owned passive.
+## The core records that activation without knowing which ball implemented it.
+func after_wall_hit(
+	_battle,
+	_fighter,
+	_opponent,
+	_side: int,
+	_contact_position: Vector2
+) -> bool:
+	return false
+
+func after_entity_contact(
+	_battle,
+	_fighter,
+	_entity: BallEntity,
+	_damage_dealt: float
+) -> void:
+	pass
+
 func after_damage_dealt(_battle, _fighter, _opponent, _amount: float) -> void:
 	pass

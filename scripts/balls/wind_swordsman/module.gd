@@ -16,9 +16,12 @@ func _init() -> void:
 		"radius": 27.0,
 		"cooldown": 5.0,
 		"ability": "贴身指向斩击 · 曲面风障 · 施法立定",
-		"sound_kind": "blade_slash",
+		"sound_kind": "wind_cast",
 		"audio_samples": {
-			"blade_slash": HasagiVoice,
+			"blade_slash": {
+				"stream": HasagiVoice,
+				"gain_db": -10.0,
+			},
 		},
 		"sort_order": 110,
 		"tuning": {

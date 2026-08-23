@@ -2,9 +2,11 @@ class_name BattleView
 extends Control
 
 signal battle_finished(simulation: BattleSimulation)
+signal battle_resolved(simulation: BattleSimulation)
 signal combat_event(kind: String, strength: float)
 
 const BattleSimulationScript := preload("res://scripts/simulation/battle_simulation.gd")
+const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
 const DEFAULT_VIEW_SIZE := Vector2(650.0, 700.0)
 const VISIBLE_WORLD_SCALE := 1.2
 const HEALTH_BAR_WIDTH := 238.0
@@ -25,8 +27,11 @@ var left_visual: BallVisual
 var right_visual: BallVisual
 var simulation_speed := 1.0
 var paused := false
+var result_reveal_delay_seconds := GlobalGameSettingsScript.DEFAULT_RESULT_REVEAL_DELAY
 var _accumulator := 0.0
 var _finish_emitted := false
+var _resolution_emitted := false
+var _result_reveal_elapsed := 0.0
 var _last_abilities := {}
 var _font: Font
 var _shake_offset := Vector2.ZERO
@@ -54,10 +59,13 @@ func start_battle(
 		time_limit_seconds,
 		battle_arena_size
 	)
+	simulation.death_effect_duration = maxf(BattleSimulation.FIXED_STEP, result_reveal_delay_seconds)
 	left_visual = simulation.left_module.create_visual(simulation.left_ability)
 	right_visual = simulation.right_module.create_visual(simulation.right_ability)
 	_accumulator = 0.0
 	_finish_emitted = false
+	_resolution_emitted = false
+	_result_reveal_elapsed = 0.0
 	_last_abilities.clear()
 	for ball_id in BallRegistry.ids():
 		_last_abilities[ball_id] = 0
@@ -73,22 +81,44 @@ func _process(delta: float) -> void:
 	if simulation == null:
 		return
 	if not paused:
-		_accumulator += minf(delta, 0.1) * simulation_speed
+		var presentation_delta := minf(delta, 0.1) * simulation_speed
+		_accumulator += presentation_delta
 		var steps := 0
 		while _accumulator >= BattleSimulation.FIXED_STEP and steps < 32:
 			simulation.step(BattleSimulation.FIXED_STEP)
 			_accumulator -= BattleSimulation.FIXED_STEP
 			steps += 1
+		if simulation.finished:
+			_result_reveal_elapsed += presentation_delta
 		_check_combat_events()
+		if simulation.finished and not _resolution_emitted:
+			_resolution_emitted = true
+			battle_resolved.emit(simulation)
 	if simulation.camera_shake > 0.0:
 		var strength := simulation.camera_shake
 		_shake_offset = Vector2(sin(simulation.elapsed * 93.0), cos(simulation.elapsed * 79.0)) * strength
 	else:
 		_shake_offset = _shake_offset.lerp(Vector2.ZERO, minf(1.0, delta * 18.0))
-	if simulation.finished and not _finish_emitted:
+	if result_reveal_ready() and not _finish_emitted:
 		_finish_emitted = true
 		battle_finished.emit(simulation)
 	queue_redraw()
+
+func result_reveal_ready() -> bool:
+	return (
+		simulation != null
+		and simulation.finished
+		and _result_reveal_elapsed >= maxf(0.0, result_reveal_delay_seconds)
+	)
+
+func result_reveal_progress() -> float:
+	if simulation == null or not simulation.finished:
+		return 0.0
+	return clampf(
+		_result_reveal_elapsed / maxf(BattleSimulation.FIXED_STEP, result_reveal_delay_seconds),
+		0.0,
+		1.0
+	)
 
 func _check_combat_events() -> void:
 	var abilities: Dictionary = simulation.stats["abilities"]
@@ -123,7 +153,7 @@ func _draw() -> void:
 	_draw_arena_hud()
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	_draw_border()
-	if simulation.finished:
+	if result_reveal_ready():
 		_draw_result_card()
 
 func visible_world_size() -> Vector2:
@@ -191,6 +221,8 @@ func _draw_trails() -> void:
 	_draw_trail(simulation.right, right_visual)
 
 func _draw_trail(fighter: BattleSimulation.FighterState, visual: BallVisual) -> void:
+	if fighter.hp <= 0.0:
+		return
 	if fighter.trail.size() < 2:
 		return
 	for index in range(1, fighter.trail.size()):
@@ -227,9 +259,13 @@ func _visual_context(fighter: BattleSimulation.FighterState) -> Dictionary:
 	}
 
 func _draw_underlay(fighter: BattleSimulation.FighterState, visual: BallVisual) -> void:
+	if fighter.hp <= 0.0:
+		return
 	visual.draw_underlay(self, fighter, _visual_context(fighter))
 
 func _draw_ball(fighter: BattleSimulation.FighterState, visual: BallVisual) -> void:
+	if fighter.hp <= 0.0:
+		return
 	var context := _visual_context(fighter)
 	var position: Vector2 = context["position"]
 	var radius: float = context["radius"]
@@ -239,6 +275,8 @@ func _draw_ball(fighter: BattleSimulation.FighterState, visual: BallVisual) -> v
 	if fighter.hit_flash > 0.0:
 		draw_circle(position, radius, Color(1.0, 1.0, 1.0, fighter.hit_flash * 0.52))
 	_draw_center_value(position, str(int(ceil(fighter.hp))), radius, Color.WHITE)
+	for effect in fighter.status_effects:
+		effect.draw_topmost_overlay(self, fighter, context)
 
 func _draw_center_value(position: Vector2, text: String, radius: float, color: Color) -> void:
 	var font_size := clampi(

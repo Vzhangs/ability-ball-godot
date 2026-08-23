@@ -6,7 +6,7 @@ godot_bin="${GODOT_BIN:-godot}"
 ffmpeg_bin="${FFMPEG_BIN:-ffmpeg}"
 seed="${1:-20260815}"
 left_ball="${2:-vampire}"
-right_ball="${3:-six_king}"
+right_ball="${3:-wdc}"
 time_limit="${4:-120}"
 recording_fps="${5:-60}"
 
@@ -34,7 +34,7 @@ command -v "$ffmpeg_bin" >/dev/null || { echo "找不到 FFmpeg：$ffmpeg_bin" >
 
 mkdir -p "$project_dir/builds"
 output_slug="ability-ball-seed-${seed}"
-if [[ "$left_ball" != "vampire" ]] || [[ "$right_ball" != "six_king" ]]; then
+if [[ "$left_ball" != "vampire" ]] || [[ "$right_ball" != "wdc" ]]; then
   output_slug="ability-ball-${left_ball}-vs-${right_ball}-seed-${seed}"
 fi
 master_file="$project_dir/builds/${output_slug}-master.avi"
@@ -58,7 +58,7 @@ cover_title_y=605
 
 "$ffmpeg_bin" -y -hide_banner \
   -i "$master_file" \
-  -filter_complex "[0:v]crop=1080:1200:0:0,split=3[normal][cover_base_source][cover_title_source];[cover_base_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,drawbox=x=0:y=0:w=1080:h=120:color=0x030405:t=fill[cover_base];[cover_title_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,crop=1080:120:0:0,format=rgba,colorkey=0x030405:0.12:0.08[cover_title];[cover_base][cover_title]overlay=0:${cover_title_y}:format=auto[cover];[normal][cover]overlay=enable='eq(n,0)':eof_action=pass[video]" \
+  -filter_complex "[0:v]crop=1080:1200:0:0,split=3[normal][cover_base_source][cover_title_source];[cover_base_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,drawbox=x=0:y=0:w=1080:h=120:color=0x030405:t=fill[cover_base];[cover_title_source]select='eq(n,${cover_frame})',setpts=PTS-STARTPTS,crop=1080:120:0:0,format=rgba,colorkey=0x030405:0.12:0.08[cover_title];[cover_base][cover_title]overlay=0:${cover_title_y}:format=auto[cover];[normal][cover]overlay=enable='eq(n,0)':eof_action=pass[content];[content]pad=1080:1920:0:360:color=black[video]" \
   -map "[video]" -map '0:a?' \
   -c:v libx264 -preset slow -crf 18 -pix_fmt yuv420p \
   -c:a aac -b:a 192k \

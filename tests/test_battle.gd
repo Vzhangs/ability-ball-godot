@@ -5,9 +5,9 @@ const BattleSimulationScript := preload("res://scripts/simulation/battle_simulat
 var failures: Array[String] = []
 
 func _init() -> void:
-	var first := BattleSimulationScript.new(20260815, "vampire", "six_king")
-	var replay := BattleSimulationScript.new(20260815, "vampire", "six_king")
-	var divergent := BattleSimulationScript.new(20260816, "vampire", "six_king")
+	var first := BattleSimulationScript.new(20260815, "vampire", "wdc")
+	var replay := BattleSimulationScript.new(20260815, "vampire", "wdc")
+	var divergent := BattleSimulationScript.new(20260816, "vampire", "wdc")
 
 	for frame in range(int(ceil(first.max_battle_time / BattleSimulation.FIXED_STEP)) + 4):
 		first.step(BattleSimulation.FIXED_STEP)
@@ -16,7 +16,7 @@ func _init() -> void:
 		if frame % 600 == 0:
 			_check(first.snapshot() == replay.snapshot(), "相同种子在第 %d 帧保持确定性" % frame)
 			_check(_inside_arena(first.left, first.arena_size()), "吸血鬼始终留在竞技场")
-			_check(_inside_arena(first.right, first.arena_size()), "六王球始终留在竞技场")
+			_check(_inside_arena(first.right, first.arena_size()), "WDC 始终留在竞技场")
 		if first.finished and replay.finished and divergent.finished:
 			break
 
@@ -26,23 +26,24 @@ func _init() -> void:
 	_check(is_equal_approx(first.damage_scale, 1.0), "所有组合使用统一伤害倍率")
 	_check(is_equal_approx(first.recovery_scale, 1.0), "所有组合使用统一回复倍率")
 	_check(is_equal_approx(first.left.max_hp, 100.0), "吸血鬼默认生命值为 100")
-	_check(is_equal_approx(first.right.max_hp, 100.0), "六王球默认生命值为 100")
-	_check(first.winner_id in ["vampire", "six_king"], "默认对局产生合法胜者")
+	_check(is_equal_approx(first.right.max_hp, 100.0), "WDC 默认生命值为 100")
+	_check(first.winner_id in ["vampire", "wdc"], "默认对局产生合法胜者")
 	_check(first.elapsed > 0.0 and first.elapsed <= first.max_battle_time, "默认对局按当前持久化数值自然结束")
 	var vampire_against_laser := BattleSimulationScript.new(20260815, "vampire", "laser")
 	_check(first.left_module.fighter_spec() == vampire_against_laser.left_module.fighter_spec(), "吸血鬼面对不同对手始终使用唯一配置")
 	_check(first.left_ability.get_script() == vampire_against_laser.left_ability.get_script(), "吸血鬼面对不同对手始终使用唯一能力脚本")
 	var winner = first.winner()
-	_check(winner.hp > 0.0 and winner.hp <= winner.max_hp, "胜者生命值保持在自身配置范围内")
+	_check(winner.hp > 0.0, "胜者保留正生命值")
+	_check(winner.id == "vampire" or winner.hp <= winner.max_hp, "只有明确支持超上限治疗的吸血鬼可以突破配置生命上限")
 	_check(snapshot == replay.snapshot(), "最终状态可重放")
 	_check(snapshot != divergent.snapshot(), "不同种子产生不同战斗")
-	_check(BattleSimulationScript.new(0, "vampire", "six_king").seed_value == 20260815, "非法零种子回退到默认值")
+	_check(BattleSimulationScript.new(0, "vampire", "wdc").seed_value == 20260815, "非法零种子回退到默认值")
 
 	print("ABILITY_BALL_TEST_SUMMARY ", JSON.stringify({
 		"elapsed": first.elapsed,
 		"winner": first.winner_id,
 		"vampire_hp": first.left.hp,
-		"six_king_hp": first.right.hp,
+		"wdc_hp": first.right.hp,
 		"stats": first.stats,
 	}))
 

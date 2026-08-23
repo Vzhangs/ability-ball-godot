@@ -66,6 +66,44 @@ func receive_attack(
 ) -> float:
 	return 0.0
 
+## Optional entity-to-entity contact contract. Moving summons may resolve contacts
+## against any entity that opts in, without knowing its concrete type or owning ball.
+func participates_in_entity_collision() -> bool:
+	return false
+
+## Zero makes an entity static during contact separation; positive values share motion.
+func entity_collision_inverse_mass() -> float:
+	return 1.0
+
+func entity_contact_damage() -> float:
+	return 0.0
+
+func entity_contact_color() -> Color:
+	return absorption_visual_color()
+
+func can_resolve_entity_contact(_other: BallEntity) -> bool:
+	return false
+
+func begin_entity_contact(_other: BallEntity) -> void:
+	pass
+
+## Optional fighter-to-entity contact contract. Entities opt in when hostile
+## fighter bodies should be physically separated and allowed to exchange their
+## own advertised contact damage through the generic battle pipeline.
+func participates_in_fighter_collision() -> bool:
+	return false
+
+## Zero keeps the entity fixed while the fighter takes the full separation and
+## impulse; positive values let both bodies share the collision response.
+func fighter_collision_inverse_mass() -> float:
+	return entity_collision_inverse_mass()
+
+func can_resolve_fighter_contact(_fighter_side: int) -> bool:
+	return false
+
+func begin_fighter_contact(_fighter_side: int) -> void:
+	pass
+
 func is_absorbable() -> bool:
 	return false
 

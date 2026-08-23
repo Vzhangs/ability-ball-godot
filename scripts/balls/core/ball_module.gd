@@ -175,6 +175,16 @@ func validation_errors() -> PackedStringArray:
 	for event_kind in _audio_samples:
 		if String(event_kind).is_empty():
 			errors.append("%s has an empty audio event key" % id)
-		elif not _audio_samples[event_kind] is AudioStream:
-			errors.append("%s audio event %s must provide an AudioStream" % [id, event_kind])
+		elif not _audio_samples[event_kind] is Dictionary:
+			errors.append("%s audio event %s must provide a sample specification" % [id, event_kind])
+		else:
+			var sample_spec: Dictionary = _audio_samples[event_kind]
+			if not sample_spec.get("stream") is AudioStream:
+				errors.append("%s audio event %s must provide an AudioStream" % [id, event_kind])
+			var gain_db = sample_spec.get("gain_db")
+			if not (gain_db is int or gain_db is float):
+				errors.append("%s audio event %s must provide a numeric gain_db" % [id, event_kind])
+			var looped = sample_spec.get("loop", false)
+			if not looped is bool:
+				errors.append("%s audio event %s loop flag must be boolean" % [id, event_kind])
 	return errors

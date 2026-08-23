@@ -3,23 +3,31 @@ extends BallAbility
 const SlashEffectEntity := preload("res://scripts/balls/wind_swordsman/slash_effect_entity.gd")
 const GroundCrackEntity := preload("res://scripts/balls/wind_swordsman/ground_crack_entity.gd")
 const WindWallEntity := preload("res://scripts/balls/wind_swordsman/wind_wall_entity.gd")
+const STANDSTILL_MOVEMENT_PRIORITY := BallStatusEffect.MOVEMENT_CONTROL_PRIORITY_ABILITY
 
 var _slash_timer := 0.0
 var _standstill_remaining := 0.0
 var _resume_velocity := Vector2.ZERO
 var _resume_pending := false
 
-func before_motion(_battle, fighter, _opponent, _side: int, delta: float) -> void:
+func before_motion(battle, fighter, _opponent, _side: int, delta: float) -> void:
 	_slash_timer = maxf(0.0, _slash_timer - delta)
-	if _standstill_remaining > 0.0:
+	var standstill_was_active := _standstill_remaining > 0.0
+	if standstill_was_active:
 		_standstill_remaining = maxf(0.0, _standstill_remaining - delta)
-		fighter.velocity = Vector2.ZERO
+	if _has_higher_priority_movement_control(battle, fighter):
+		_resume_pending = false
+		return
+	if standstill_was_active:
+		_apply_standstill(fighter)
 		return
 	if _resume_pending:
 		fighter.velocity = _resume_velocity
 		_resume_pending = false
 
-func speed_multiplier(_battle, _fighter, _opponent, _side: int) -> float:
+func speed_multiplier(battle, fighter, _opponent, _side: int) -> float:
+	if _has_higher_priority_movement_control(battle, fighter):
+		return 1.0
 	return 0.0 if _standstill_remaining > 0.0 or _resume_pending else 1.0
 
 func on_step(battle, fighter, opponent, side: int, delta: float) -> void:
@@ -36,7 +44,7 @@ func on_step(battle, fighter, opponent, side: int, delta: float) -> void:
 
 func activate(battle, fighter, opponent, side: int) -> void:
 	var direction := _aim_direction(fighter, opponent)
-	_begin_standstill(fighter)
+	_begin_standstill(battle, fighter)
 	var active_walls: Array[BallEntity] = battle.entities(side, "wind_wall")
 	while active_walls.size() >= settingi("max_walls"):
 		active_walls.pop_front().removed = true
@@ -56,13 +64,12 @@ func activate(battle, fighter, opponent, side: int) -> void:
 	wall.call("intercept_projectiles", battle, settingf("wall_activation_lookahead"))
 	battle.spawn_ring(wall.pos, fighter.accent, 8.0, settingf("wall_curve_radius") * 0.72, 0.34)
 	battle.spawn_particles(wall.pos, fighter.accent, 10, 115.0)
-	battle.emit_combat_event("wind_cast", 0.76)
 	battle.record_stat("wind_walls")
 
 func _release_slash(battle, fighter, opponent, side: int, target_position: Vector2) -> void:
 	_slash_timer = settingf("slash_cooldown")
 	var direction := _aim_direction_to(fighter, target_position)
-	_begin_standstill(fighter)
+	_begin_standstill(battle, fighter)
 	var reach := settingf("slash_reach")
 	var half_width := settingf("slash_half_width")
 	var start: Vector2 = fighter.pos
@@ -104,15 +111,24 @@ func _release_slash(battle, fighter, opponent, side: int, target_position: Vecto
 	if hit_something:
 		battle.shake_camera(3.8)
 
-func _begin_standstill(fighter) -> void:
+func _begin_standstill(battle, fighter) -> void:
 	var duration := settingf("skill_standstill_duration")
 	if duration <= 0.0:
 		return
+	_standstill_remaining = maxf(_standstill_remaining, duration)
+	if _has_higher_priority_movement_control(battle, fighter):
+		_resume_pending = false
+		return
+	_apply_standstill(fighter)
+
+func _apply_standstill(fighter) -> void:
 	if not _resume_pending:
 		_resume_velocity = fighter.velocity
 		_resume_pending = true
-	_standstill_remaining = maxf(_standstill_remaining, duration)
 	fighter.velocity = Vector2.ZERO
+
+func _has_higher_priority_movement_control(battle, fighter) -> bool:
+	return battle.movement_control_priority(fighter) > STANDSTILL_MOVEMENT_PRIORITY
 
 func _aim_direction(fighter, opponent) -> Vector2:
 	return _aim_direction_to(fighter, opponent.pos)

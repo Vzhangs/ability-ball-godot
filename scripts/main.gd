@@ -21,8 +21,9 @@ var seed_value := 20260815
 var time_limit_seconds: float = BattleSimulationScript.DEFAULT_BATTLE_TIME
 var battle_arena_size: Vector2 = BattleSimulationScript.DEFAULT_ARENA_SIZE
 var recording_fps := GlobalGameSettingsScript.DEFAULT_RECORDING_FPS
+var result_reveal_delay_seconds := GlobalGameSettingsScript.DEFAULT_RESULT_REVEAL_DELAY
 var current_left_id := "vampire"
-var current_right_id := "six_king"
+var current_right_id := "wdc"
 var speed_values := [1.0, 2.0, 4.0]
 var speed_index := 0
 
@@ -140,6 +141,8 @@ func _build_battle_view() -> void:
 	_replace_battle_view()
 
 func _replace_battle_view(end_reason: String = "battle_replaced") -> void:
+	if procedural_audio != null:
+		procedural_audio.stop_all_looped_sample_events()
 	if battle_view != null:
 		_finish_battle_log("interrupted", end_reason)
 		remove_child(battle_view)
@@ -147,6 +150,7 @@ func _replace_battle_view(end_reason: String = "battle_replaced") -> void:
 	battle_view = BattleViewScript.new()
 	battle_view.position = _battle_view_position()
 	battle_view.size = BattleViewScript.DEFAULT_VIEW_SIZE
+	battle_view.result_reveal_delay_seconds = result_reveal_delay_seconds
 	add_child(battle_view)
 	battle_view.start_battle(
 		seed_value,
@@ -156,6 +160,7 @@ func _replace_battle_view(end_reason: String = "battle_replaced") -> void:
 		battle_arena_size
 	)
 	battle_view.set_simulation_speed(speed_values[speed_index])
+	battle_view.battle_resolved.connect(_on_battle_resolved)
 	battle_view.battle_finished.connect(_on_battle_finished)
 	battle_view.combat_event.connect(_on_combat_event)
 	_start_battle_log()
@@ -341,7 +346,7 @@ func _record_current_battle() -> void:
 
 func _video_output_path(seed: int, left_ball_id: String, right_ball_id: String) -> String:
 	var output_slug := "ability-ball-seed-%d" % seed
-	if left_ball_id != "vampire" or right_ball_id != "six_king":
+	if left_ball_id != "vampire" or right_ball_id != "wdc":
 		output_slug = "ability-ball-%s-vs-%s-seed-%d" % [left_ball_id, right_ball_id, seed]
 	return ProjectSettings.globalize_path("res://builds/%s.mp4" % output_slug)
 
@@ -394,6 +399,7 @@ func _apply_global_settings(settings: Dictionary) -> void:
 	time_limit_seconds = _time_limit_from_arguments(configuration.settingf("battle_time_seconds"))
 	battle_arena_size = configuration.arena_size()
 	recording_fps = configuration.settingi("recording_fps")
+	result_reveal_delay_seconds = configuration.settingf("result_reveal_delay_seconds")
 	_update_recording_menu()
 
 func _build_footer() -> void:
@@ -423,6 +429,9 @@ func _on_battle_finished(simulation) -> void:
 		_recording_quit_scheduled = true
 		_quit_after_result()
 
+func _on_battle_resolved(_simulation) -> void:
+	procedural_audio.stop_all_looped_sample_events()
+
 func _on_combat_event(kind: String, strength: float) -> void:
 	procedural_audio.play_event(kind, strength)
 
@@ -433,7 +442,9 @@ func _quit_after_result() -> void:
 	get_tree().quit()
 
 func _toggle_pause() -> void:
-	battle_view.set_paused(not battle_view.paused)
+	var should_pause: bool = not bool(battle_view.paused)
+	battle_view.set_paused(should_pause)
+	procedural_audio.set_looped_sample_events_paused(should_pause)
 	pause_button.text = "继续" if battle_view.paused else "暂停"
 
 func _cycle_speed() -> void:
@@ -461,6 +472,7 @@ func _on_seed_submitted(value: String) -> void:
 
 func _start_seed(value: int, end_reason: String) -> void:
 	_finish_battle_log("interrupted", end_reason)
+	procedural_audio.stop_all_looped_sample_events()
 	seed_value = value if value != 0 else 20260815
 	_recording_quit_scheduled = false
 	seed_edit.text = str(seed_value)

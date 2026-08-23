@@ -81,8 +81,11 @@ func damageable_entities_on_segment(
 func contact_damage_for_side(source_side: int, target) -> float:
 	return _battle().contact_damage_for_side(source_side, target)
 
-func heal(fighter, amount: float) -> float:
-	return _battle().heal(fighter, amount)
+func movement_control_priority(fighter) -> int:
+	return _battle().movement_control_priority(fighter)
+
+func heal(fighter, amount: float, allow_overheal: bool = false) -> float:
+	return _battle().heal(fighter, amount, allow_overheal)
 
 func spawn_ring(position: Vector2, color: Color, start_radius: float, end_radius: float, duration: float) -> void:
 	_battle().spawn_ring(position, color, start_radius, end_radius, duration)
@@ -117,6 +120,9 @@ func apply_status(target, effect: BallStatusEffect) -> BallStatusEffect:
 
 func has_status(target, key_prefix: String) -> bool:
 	return _battle().has_status(target, key_prefix)
+
+func remove_status(target, exact_key: String) -> bool:
+	return _battle().remove_status(target, exact_key)
 
 func ray_to_arena_edge(origin: Vector2, direction: Vector2) -> Vector2:
 	return _battle().ray_to_arena_edge(origin, direction)

@@ -15,7 +15,7 @@ func _run() -> void:
 	var simulation := BattleSimulationScript.new(
 		20261001,
 		"vampire",
-		"six_king",
+		"wdc",
 		0.1,
 		Vector2(440.0, 440.0)
 	)

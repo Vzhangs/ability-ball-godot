@@ -11,6 +11,9 @@ const CORE_FILES := [
 	"res://scripts/balls/core/ball_registry.gd",
 	"res://scripts/balls/core/ball_render_context.gd",
 	"res://scripts/balls/core/ball_status_effect.gd",
+	"res://scripts/balls/core/burn_status_effect.gd",
+	"res://scripts/balls/core/invulnerability_status_effect.gd",
+	"res://scripts/balls/core/fighter_death_effect_entity.gd",
 	"res://scripts/balls/core/ball_visual.gd",
 	"res://scripts/balls/core/projectile_entity.gd",
 	"res://scripts/logging/battle_logger.gd",
@@ -92,8 +95,9 @@ func _check_global_settings_contract() -> void:
 	_check(settings.settingi("battle_time_seconds") == 120, "全局默认对局时限为两分钟")
 	_check(settings.arena_size() == Vector2(640.0, 640.0), "全局默认竞技场为 640×640")
 	_check(settings.settingi("recording_fps") == 60, "全局默认录制帧率为 60 FPS")
+	_check(is_equal_approx(settings.settingf("result_reveal_delay_seconds"), 1.2), "全局默认延迟 1.2 秒揭晓胜负")
 	var specs: Dictionary = settings.setting_specs()
-	_check(specs.size() == 4, "全局 Schema 包含时限、竞技场宽高与录制帧率")
+	_check(specs.size() == 5, "全局 Schema 包含时限、竞技场宽高、录制帧率与胜负揭晓延迟")
 	_check(not specs.has("max_hp") and not specs.has("damage"), "全局设置不接管任何球属性")
 	var simulation_source := FileAccess.get_file_as_string("res://scripts/simulation/battle_simulation.gd")
 	_check(simulation_source.contains("time_limit_seconds"), "模拟器显式接收全局默认对局时限")
@@ -169,6 +173,7 @@ func _check_public_view_only_draws_generic_contracts() -> void:
 	_check(source.contains("entity.draw(self, context)"), "公共视图通过 BallEntity 契约绘制附属物")
 	_check(source.contains("entity.draw_hud(self, health_bar_bounds)"), "公共视图通过 BallEntity 契约绘制实体 HUD")
 	_check(source.contains("effect.draw_overlay(self, fighter, context)"), "公共视图通过 BallStatusEffect 契约绘制状态")
+	_check(source.contains("effect.draw_topmost_overlay(self, fighter, context)"), "公共视图通过状态契约统一绘制最上层标识")
 
 func _check_single_engine_entrypoint() -> void:
 	var simulation_files := PackedStringArray()

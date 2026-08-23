@@ -4,6 +4,7 @@ extends RefCounted
 const DEFAULT_BATTLE_TIME := 120.0
 const DEFAULT_ARENA_SIZE := Vector2(640.0, 640.0)
 const DEFAULT_RECORDING_FPS := 60
+const DEFAULT_RESULT_REVEAL_DELAY := 1.2
 
 const SETTING_SPECS := {
 	"battle_time_seconds": {
@@ -53,6 +54,18 @@ const SETTING_SPECS := {
 		"order": 40,
 		"suffix": " FPS",
 		"tooltip": "只控制成片画面帧率；战斗物理始终以 60 Hz 固定步长计算。",
+	},
+	"result_reveal_delay_seconds": {
+		"label": "胜负揭晓延迟",
+		"group": "战斗表现",
+		"default": DEFAULT_RESULT_REVEAL_DELAY,
+		"min": 0.4,
+		"max": 5.0,
+		"step": 0.1,
+		"kind": "float",
+		"order": 50,
+		"suffix": " 秒",
+		"tooltip": "败方死亡特效和音效先完整呈现，随后再显示获胜弹窗。",
 	},
 }
 

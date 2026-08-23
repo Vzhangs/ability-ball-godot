@@ -37,12 +37,15 @@ func after_damage_dealt(battle, fighter, _opponent, amount: float) -> void:
 func after_entities_step(battle, _fighter, _opponent, side: int, _delta: float) -> void:
 	var clones: Array[BallEntity] = _active_spawned_clones()
 	_resolve_local_clone_collisions(battle, clones)
-	if side == 0:
-		var foreign_clones: Array[BallEntity] = []
-		for candidate: BallEntity in battle.entities(-1, "splitter_clone"):
-			if candidate not in clones:
-				foreign_clones.append(candidate)
-		_resolve_hostile_clone_collisions(battle, clones, foreign_clones)
+	var external_entities: Array[BallEntity] = []
+	for candidate: BallEntity in battle.entities():
+		if candidate in clones or not candidate.participates_in_entity_collision():
+			continue
+		# Two splitter abilities would otherwise resolve the same cross-group clone pair.
+		if candidate.has_tag("splitter_clone") and side != 0:
+			continue
+		external_entities.append(candidate)
+	_resolve_external_entity_collisions(battle, clones, external_entities)
 	clones.sort_custom(func(left: BallEntity, right: BallEntity) -> bool:
 		return int(left.call("clone_id")) < int(right.call("clone_id"))
 	)
@@ -100,50 +103,54 @@ func _emit_split_event(battle, spawn_count: int) -> void:
 
 func _resolve_local_clone_collisions(battle, clones: Array[BallEntity]) -> void:
 	var grid: Dictionary = {}
+	var cell_size := maxf(1.0, settingf("clone_radius") * settingf("clone_collision_cell_factor"))
 	for clone in clones:
 		if clone.removed:
 			continue
-		var cell := _collision_cell(clone.pos)
+		var cell := _collision_cell(clone.pos, cell_size)
 		for cell_x in range(cell.x - 1, cell.x + 2):
 			for cell_y in range(cell.y - 1, cell.y + 2):
 				var bucket: Array = grid.get(Vector2i(cell_x, cell_y), [])
 				for other in bucket:
 					if clone.removed:
 						break
-					clone.call("resolve_clone_collision", battle, other)
+					clone.call("resolve_entity_collision", battle, other)
 		if clone.removed:
 			continue
 		var own_bucket: Array = grid.get(cell, [])
 		own_bucket.append(clone)
 		grid[cell] = own_bucket
 
-func _resolve_hostile_clone_collisions(
+func _resolve_external_entity_collisions(
 	battle,
 	clones: Array[BallEntity],
-	hostile_clones: Array[BallEntity]
+	external_entities: Array[BallEntity]
 ) -> void:
-	if hostile_clones.is_empty():
+	if external_entities.is_empty():
 		return
-	var hostile_grid: Dictionary = {}
-	for hostile_clone in hostile_clones:
-		var cell := _collision_cell(hostile_clone.pos)
-		var bucket: Array = hostile_grid.get(cell, [])
-		bucket.append(hostile_clone)
-		hostile_grid[cell] = bucket
+	var maximum_radius := settingf("clone_radius")
+	for entity: BallEntity in external_entities:
+		maximum_radius = maxf(maximum_radius, entity.radius)
+	var cell_size := maxf(1.0, maximum_radius * 2.0)
+	var external_grid: Dictionary = {}
+	for entity: BallEntity in external_entities:
+		var cell := _collision_cell(entity.pos, cell_size)
+		var bucket: Array = external_grid.get(cell, [])
+		bucket.append(entity)
+		external_grid[cell] = bucket
 	for clone in clones:
 		if clone.removed:
 			continue
-		var cell := _collision_cell(clone.pos)
+		var cell := _collision_cell(clone.pos, cell_size)
 		for cell_x in range(cell.x - 1, cell.x + 2):
 			for cell_y in range(cell.y - 1, cell.y + 2):
-				var bucket: Array = hostile_grid.get(Vector2i(cell_x, cell_y), [])
+				var bucket: Array = external_grid.get(Vector2i(cell_x, cell_y), [])
 				for other in bucket:
 					if clone.removed:
 						break
-					clone.call("resolve_clone_collision", battle, other)
+					clone.call("resolve_entity_collision", battle, other)
 
-func _collision_cell(position: Vector2) -> Vector2i:
-	var cell_size := maxf(1.0, settingf("clone_radius") * settingf("clone_collision_cell_factor"))
+func _collision_cell(position: Vector2, cell_size: float) -> Vector2i:
 	return Vector2i(
 		floori(position.x / cell_size),
 		floori(position.y / cell_size)
