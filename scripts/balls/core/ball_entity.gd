@@ -7,6 +7,9 @@ extends RefCounted
 const ABOVE_BALL_DRAW_LAYER := 1
 
 var owner_side := -1
+## Runtime creator identity. `owner_side` remains the stable team allegiance;
+## this UID distinguishes multiple main fighters that share that allegiance.
+var owner_fighter_uid := -1
 var pos := Vector2.ZERO
 var velocity := Vector2.ZERO
 var radius := 0.0
@@ -130,6 +133,9 @@ func transfer_ownership(new_owner_side: int, new_owner_anchor = null) -> bool:
 		return false
 	var previous_owner_side := owner_side
 	owner_side = new_owner_side
+	owner_fighter_uid = int(new_owner_anchor.get("fighter_uid")) \
+		if new_owner_anchor != null and new_owner_anchor.get("fighter_uid") != null \
+		else -1
 	on_ownership_transferred(previous_owner_side, new_owner_side, new_owner_anchor)
 	return true
 

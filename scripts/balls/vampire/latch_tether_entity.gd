@@ -23,8 +23,8 @@ func _init(
 	draw_layer = 23
 
 func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
-	var vampire = context.fighter_for_side(owner_side)
-	var victim = context.fighter_for_side(1 - owner_side)
+	var vampire = context.owner_for_entity(self)
+	var victim = context.opponent_for_entity(self)
 	if _target_entity_ref != null:
 		victim = _target_entity_ref.get_ref()
 		if victim == null or victim.removed:

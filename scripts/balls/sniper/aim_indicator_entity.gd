@@ -40,8 +40,8 @@ func reticle_radius(target_radius: float) -> float:
 	return lerpf(target_radius * 2.15 + 14.0, target_radius * 1.22 + 2.0, eased)
 
 func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
-	var owner = context.fighter_for_side(owner_side)
-	var target = context.fighter_for_side(1 - owner_side)
+	var owner = context.owner_for_entity(self)
+	var target = context.opponent_for_entity(self)
 	if owner == null or target == null:
 		return
 	var direction: Vector2 = (target.pos - owner.pos).normalized()

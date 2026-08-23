@@ -1,7 +1,7 @@
 class_name BattleLogger
 extends RefCounted
 
-const SCHEMA_VERSION := 1
+const SCHEMA_VERSION := 2
 const DEFAULT_LOG_ROOT := "res://builds/logs"
 
 var log_root := DEFAULT_LOG_ROOT
@@ -70,7 +70,9 @@ func _battle_payload(simulation: BattleSimulation) -> Dictionary:
 		"finished": simulation.finished,
 		"winner_id": simulation.winner_id,
 		"winner_side": simulation.winner_side,
+		"winner_team_id": simulation.winner_team_id,
 		"finish_reason": simulation.finish_reason,
+		"setup": _json_safe(simulation.battle_setup.snapshot()),
 		"rules": {
 			"fixed_step_seconds": BattleSimulation.FIXED_STEP,
 			"physics_hz": int(round(1.0 / BattleSimulation.FIXED_STEP)),
@@ -83,7 +85,10 @@ func _battle_payload(simulation: BattleSimulation) -> Dictionary:
 		"participants": {
 			"left": _participant_payload(simulation.left, simulation.left_module, simulation.left_ability),
 			"right": _participant_payload(simulation.right, simulation.right_module, simulation.right_ability),
+			"fighters": _fighter_history_payload(simulation),
 		},
+		"teams": _json_safe(simulation.snapshot()["teams"]),
+		"team_events": _json_safe(simulation.team_events),
 		"snapshot": _json_safe(simulation.snapshot()),
 		"statistics": _json_safe(simulation.stats.duplicate(true)),
 		"entities": _objects_payload(simulation.entities),
@@ -102,6 +107,9 @@ func _participant_payload(fighter, module: BallModule, ability: BallAbility) -> 
 		statuses.append(_object_payload(effect))
 	return {
 		"fighter": {
+			"fighter_uid": fighter.fighter_uid,
+			"team_id": fighter.team_id,
+			"roster_index": fighter.roster_index,
 			"id": fighter.id,
 			"display_name": fighter.display_name,
 			"color": _json_safe(fighter.color),
@@ -136,6 +144,16 @@ func _participant_payload(fighter, module: BallModule, ability: BallAbility) -> 
 		},
 		"ability_state": _object_payload(ability),
 	}
+
+func _fighter_history_payload(simulation: BattleSimulation) -> Array:
+	var result: Array = []
+	for fighter in simulation.fighter_history:
+		result.append(_participant_payload(
+			fighter,
+			simulation.module_for_fighter(fighter),
+			simulation.ability_for_fighter(fighter)
+		))
+	return result
 
 func _objects_payload(objects: Array) -> Array:
 	var result: Array = []
@@ -201,12 +219,15 @@ func _append_event(payload: Dictionary) -> Error:
 
 func _make_battle_id(simulation: BattleSimulation) -> String:
 	var compact_time := started_at_utc.replace("-", "").replace(":", "").replace("T", "-").trim_suffix("Z")
-	return "%s-%06d-p%d-%s-vs-%s-seed-%d" % [
+	var roster_ids: Array[String] = []
+	for team_spec in simulation.battle_setup.teams:
+		roster_ids.append("-".join(team_spec["roster"]))
+	return "%s-%06d-p%d-%s-%s-seed-%d" % [
 		compact_time,
 		Time.get_ticks_usec() % 1000000,
 		OS.get_process_id(),
-		simulation.left.id,
-		simulation.right.id,
+		simulation.battle_setup.mode,
+		"-vs-".join(roster_ids),
 		simulation.seed_value,
 	]
 

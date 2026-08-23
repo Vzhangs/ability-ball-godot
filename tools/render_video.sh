@@ -9,6 +9,8 @@ left_ball="${2:-vampire}"
 right_ball="${3:-wdc}"
 time_limit="${4:-120}"
 recording_fps="${5:-60}"
+battle_mode="${6:-duel}"
+team_rosters="${7:-${left_ball}|${right_ball}}"
 
 if [[ ! "$seed" =~ ^-?[0-9]+$ ]] || [[ "$seed" == "0" ]]; then
   echo "种子必须是非零整数。" >&2
@@ -30,12 +32,20 @@ command -v "$ffmpeg_bin" >/dev/null || { echo "找不到 FFmpeg：$ffmpeg_bin" >
 
 "$godot_bin" --headless --path "$project_dir" --script res://tools/validate_ball_ids.gd -- \
   "--left=$left_ball" \
-  "--right=$right_ball"
+  "--right=$right_ball" \
+  "--battle-mode=$battle_mode" \
+  "--team-rosters=$team_rosters"
 
 mkdir -p "$project_dir/builds"
 output_slug="ability-ball-seed-${seed}"
 if [[ "$left_ball" != "vampire" ]] || [[ "$right_ball" != "wdc" ]]; then
   output_slug="ability-ball-${left_ball}-vs-${right_ball}-seed-${seed}"
+fi
+if [[ "$battle_mode" != "duel" ]]; then
+  safe_rosters="${team_rosters//|/-vs-}"
+  safe_rosters="${safe_rosters//,/-}"
+  safe_rosters="${safe_rosters:0:96}"
+  output_slug="ability-ball-${battle_mode}-${safe_rosters}-seed-${seed}"
 fi
 master_file="$project_dir/builds/${output_slug}-master.avi"
 output_file="$project_dir/builds/${output_slug}.mp4"
@@ -53,6 +63,8 @@ cover_title_y=605
   "--seed=$seed" \
   "--left=$left_ball" \
   "--right=$right_ball" \
+  "--battle-mode=$battle_mode" \
+  "--team-rosters=$team_rosters" \
   "--time-limit=$time_limit" \
   "--recording-fps=$recording_fps"
 

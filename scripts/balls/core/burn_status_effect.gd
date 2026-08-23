@@ -56,7 +56,9 @@ func tick(battle, target, delta: float) -> void:
 	_tick_timer -= delta
 	while _tick_timer <= 0.0:
 		_tick_timer += _tick_interval
-		var source = battle.fighter_for_side(source_side)
+		var source = battle.fighter_for_uid(source_fighter_uid)
+		if source == null:
+			source = battle.fighter_for_side(source_side)
 		var applied: float = battle.damage(target, _damage_per_tick, _effect_color, source)
 		if applied > 0.0:
 			battle.record_stat("burn_damage_ticks")

@@ -2,6 +2,7 @@ extends SceneTree
 
 const BattleLoggerScript := preload("res://scripts/logging/battle_logger.gd")
 const BattleSimulationScript := preload("res://scripts/simulation/battle_simulation.gd")
+const BattleSetupScript := preload("res://scripts/simulation/battle_setup.gd")
 
 var failures: Array[String] = []
 
@@ -14,8 +15,7 @@ func _run() -> void:
 	var logger: BattleLogger = BattleLoggerScript.new(test_root)
 	var simulation := BattleSimulationScript.new(
 		20261001,
-		"vampire",
-		"wdc",
+		BattleSetupScript.relay(["vampire", "laser"], ["wdc", "plant"]),
 		0.1,
 		Vector2(440.0, 440.0)
 	)
@@ -25,6 +25,8 @@ func _run() -> void:
 	})
 	_check(start_error == OK, "对局开始日志写入成功")
 	_check(FileAccess.file_exists(logger.log_path), "每局日志创建独立 JSONL 文件")
+	simulation.damage(simulation.left, simulation.left.hp, simulation.right.accent, simulation.right)
+	simulation.call("_check_finish")
 	while not simulation.finished:
 		simulation.step(BattleSimulation.FIXED_STEP)
 	var finish_error := logger.finish(simulation, "completed", simulation.finish_reason)
@@ -45,8 +47,11 @@ func _run() -> void:
 			_check(start_battle.get("seed") == 20261001, "日志保存真实种子")
 			_check(start_battle.get("arena_size") == {"x": 440.0, "y": 440.0}, "日志保存真实竞技场尺寸")
 			_check(start_battle.has("participants") and start_battle.has("rules"), "开始日志包含双方配置与通用规则")
+			_check(start_battle.get("setup", {}).get("mode") == BattleSetupScript.MODE_RELAY, "开始日志保存完整战斗模式与阵容设置")
 			_check(finish_battle.get("finished") == true, "结束日志保存最终完成状态")
 			_check(finish_battle.has("statistics") and finish_battle.has("entities"), "结束日志包含完整统计与实体状态")
+			_check(finish_battle.get("team_events", []).size() >= 2, "结束日志保存换人、淘汰和胜负阵营事件")
+			_check(finish_battle.get("participants", {}).get("fighters", []).size() == 3, "结束日志保留已阵亡与候补主球的 UID 级历史")
 	_cleanup(logger.log_path, test_root)
 	if failures.is_empty():
 		print("ABILITY_BALL_LOGGER_TESTS_OK")

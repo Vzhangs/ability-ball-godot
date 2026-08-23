@@ -298,7 +298,7 @@ func _draw_gatling_pea(
 	_draw_pea_eye(canvas, head_center, direction, perpendicular, draw_radius, Color("0d2b19"))
 
 func _aim_direction(context: BallRenderContext, head_position: Vector2) -> Vector2:
-	var target = context.fighter_for_side(1 - owner_side)
+	var target = context.opponent_for_entity(self)
 	if target == null:
 		return Vector2.RIGHT if owner_side == 0 else Vector2.LEFT
 	var direction: Vector2 = (context.point(target.pos) - head_position).normalized()

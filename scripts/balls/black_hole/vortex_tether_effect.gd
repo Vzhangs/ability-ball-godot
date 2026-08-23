@@ -29,7 +29,9 @@ func preserves_external_velocity() -> bool:
 func on_wall_hit(battle, target) -> void:
 	if _wall_damage_cooldown > 0.0:
 		return
-	var source = battle.fighter_for_side(source_side)
+	var source = battle.fighter_for_uid(source_fighter_uid)
+	if source == null:
+		source = battle.fighter_for_side(source_side)
 	if source == null or source.hp <= 0.0:
 		return
 	_wall_damage_cooldown = _wall_damage_interval

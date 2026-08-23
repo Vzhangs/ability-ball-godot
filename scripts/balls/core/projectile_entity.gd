@@ -35,8 +35,18 @@ func step(battle, delta: float) -> void:
 	remaining = maxf(0.0, remaining - delta)
 	var start := pos
 	var finish := pos + velocity * delta
-	var target = battle.opponent_for_side(owner_side)
-	var target_fraction := _segment_circle_hit_fraction(start, finish, target.pos, target.radius + radius)
+	var target = null
+	var target_fraction := -1.0
+	for hostile in battle.hostile_fighters(owner_side):
+		var hostile_fraction := _segment_circle_hit_fraction(
+			start,
+			finish,
+			hostile.pos,
+			hostile.radius + radius
+		)
+		if hostile_fraction >= 0.0 and (target_fraction < 0.0 or hostile_fraction < target_fraction):
+			target = hostile
+			target_fraction = hostile_fraction
 	var hit_entity: BallEntity = null
 	for entity: BallEntity in battle.damageable_entities(owner_side):
 		var entity_fraction := _segment_circle_hit_fraction(start, finish, entity.pos, entity.radius + radius)
@@ -46,7 +56,7 @@ func step(battle, delta: float) -> void:
 	if target_fraction >= 0.0:
 		pos = start.lerp(finish, target_fraction)
 		var source = battle.fighter_for_side(owner_side)
-		if hit_entity == null:
+		if hit_entity == null and target != null:
 			battle.damage(target, damage_amount, color, source)
 		else:
 			battle.damage_entity(hit_entity, damage_amount, color, owner_side)

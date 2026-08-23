@@ -10,6 +10,7 @@ const MOVEMENT_CONTROL_PRIORITY_FORCED := 100
 var key := ""
 var remaining := 0.0
 var source_side := -1
+var source_fighter_uid := -1
 
 func tick(_battle, _target, delta: float) -> void:
 	remaining = maxf(0.0, remaining - delta)
@@ -20,6 +21,7 @@ func is_expired() -> bool:
 func refresh_from(other: BallStatusEffect) -> void:
 	remaining = maxf(remaining, other.remaining)
 	source_side = other.source_side
+	source_fighter_uid = other.source_fighter_uid
 
 func preserves_external_velocity() -> bool:
 	return false

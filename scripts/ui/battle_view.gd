@@ -6,6 +6,7 @@ signal battle_resolved(simulation: BattleSimulation)
 signal combat_event(kind: String, strength: float)
 
 const BattleSimulationScript := preload("res://scripts/simulation/battle_simulation.gd")
+const BattleSetupScript := preload("res://scripts/simulation/battle_setup.gd")
 const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
 const DEFAULT_VIEW_SIZE := Vector2(650.0, 700.0)
 const VISIBLE_WORLD_SCALE := 1.2
@@ -19,12 +20,13 @@ const BALL_HEALTH_FONT_MAX_SIZE := 30
 const BALL_HEALTH_OUTLINE_WIDTH := 2.0
 const BALL_HEALTH_TEXT_ALPHA := 0.68
 const BALL_HEALTH_OUTLINE_ALPHA := 0.54
-const HEALTH_PANEL_BOTTOM := 50.0
+const HEALTH_PANEL_BOTTOM := 84.0
 const HUD_ARENA_GAP := 20.0
 
 var simulation: BattleSimulation
 var left_visual: BallVisual
 var right_visual: BallVisual
+var fighter_visuals := {}
 var simulation_speed := 1.0
 var paused := false
 var result_reveal_delay_seconds := GlobalGameSettingsScript.DEFAULT_RESULT_REVEAL_DELAY
@@ -52,16 +54,28 @@ func start_battle(
 	time_limit_seconds: float = -1.0,
 	battle_arena_size: Vector2 = BattleSimulation.DEFAULT_ARENA_SIZE
 ) -> void:
+	start_battle_setup(
+		seed_value,
+		BattleSetupScript.duel(left_ball_id, right_ball_id),
+		time_limit_seconds,
+		battle_arena_size
+	)
+
+func start_battle_setup(
+	seed_value: int,
+	setup,
+	time_limit_seconds: float = -1.0,
+	battle_arena_size: Vector2 = BattleSimulation.DEFAULT_ARENA_SIZE
+) -> void:
 	simulation = BattleSimulationScript.new(
 		seed_value,
-		left_ball_id,
-		right_ball_id,
+		setup,
 		time_limit_seconds,
 		battle_arena_size
 	)
 	simulation.death_effect_duration = maxf(BattleSimulation.FIXED_STEP, result_reveal_delay_seconds)
-	left_visual = simulation.left_module.create_visual(simulation.left_ability)
-	right_visual = simulation.right_module.create_visual(simulation.right_ability)
+	fighter_visuals.clear()
+	_sync_fighter_visuals()
 	_accumulator = 0.0
 	_finish_emitted = false
 	_resolution_emitted = false
@@ -70,6 +84,23 @@ func start_battle(
 	for ball_id in BallRegistry.ids():
 		_last_abilities[ball_id] = 0
 	queue_redraw()
+
+func _sync_fighter_visuals() -> void:
+	if simulation == null:
+		return
+	var active_uids := {}
+	for fighter in simulation.active_fighters():
+		active_uids[fighter.fighter_uid] = true
+		if not fighter_visuals.has(fighter.fighter_uid):
+			var module: BallModule = simulation.module_for_fighter(fighter)
+			fighter_visuals[fighter.fighter_uid] = module.create_visual(
+				simulation.ability_for_fighter(fighter)
+			)
+	for fighter_uid in fighter_visuals.keys():
+		if not active_uids.has(fighter_uid):
+			fighter_visuals.erase(fighter_uid)
+	left_visual = fighter_visuals.get(simulation.left.fighter_uid) if simulation.left != null else null
+	right_visual = fighter_visuals.get(simulation.right.fighter_uid) if simulation.right != null else null
 
 func set_paused(value: bool) -> void:
 	paused = value
@@ -94,6 +125,7 @@ func _process(delta: float) -> void:
 		if simulation.finished and not _resolution_emitted:
 			_resolution_emitted = true
 			battle_resolved.emit(simulation)
+	_sync_fighter_visuals()
 	if simulation.camera_shake > 0.0:
 		var strength := simulation.camera_shake
 		_shake_offset = Vector2(sin(simulation.elapsed * 93.0), cos(simulation.elapsed * 79.0)) * strength
@@ -122,10 +154,10 @@ func result_reveal_progress() -> float:
 
 func _check_combat_events() -> void:
 	var abilities: Dictionary = simulation.stats["abilities"]
-	for ball_id in [simulation.left.id, simulation.right.id]:
-		if int(abilities[ball_id]) > int(_last_abilities[ball_id]):
+	for ball_id in abilities:
+		if int(abilities[ball_id]) > int(_last_abilities.get(ball_id, 0)):
 			combat_event.emit(_sound_kind(ball_id), 0.7)
-		_last_abilities[ball_id] = int(abilities[ball_id])
+			_last_abilities[ball_id] = int(abilities[ball_id])
 	for event in simulation.take_combat_events():
 		combat_event.emit(String(event["kind"]), float(event["strength"]))
 
@@ -142,10 +174,10 @@ func _draw() -> void:
 	_draw_beams()
 	_draw_trails()
 	_draw_entities(false)
-	_draw_underlay(simulation.left, left_visual)
-	_draw_underlay(simulation.right, right_visual)
-	_draw_ball(simulation.left, left_visual)
-	_draw_ball(simulation.right, right_visual)
+	for fighter in simulation.active_fighters():
+		_draw_underlay(fighter, fighter_visuals[fighter.fighter_uid])
+	for fighter in simulation.active_fighters():
+		_draw_ball(fighter, fighter_visuals[fighter.fighter_uid])
 	_draw_entities(true)
 	_draw_impact_rings()
 	_draw_particles()
@@ -217,8 +249,8 @@ func _draw_beams() -> void:
 		draw_line(start, finish, color, float(beam["width"]) * _scale_factor(), true)
 
 func _draw_trails() -> void:
-	_draw_trail(simulation.left, left_visual)
-	_draw_trail(simulation.right, right_visual)
+	for fighter in simulation.active_fighters():
+		_draw_trail(fighter, fighter_visuals[fighter.fighter_uid])
 
 func _draw_trail(fighter: BattleSimulation.FighterState, visual: BallVisual) -> void:
 	if fighter.hp <= 0.0:
@@ -240,8 +272,7 @@ func _draw_entities(above_balls: bool) -> void:
 		size,
 		_shake_offset,
 		simulation.elapsed,
-		simulation.left,
-		simulation.right,
+		simulation.active_fighters(),
 		simulation.count_entities
 	)
 	for entity in ordered:
@@ -328,48 +359,59 @@ func _draw_floating_texts() -> void:
 		draw_string(_font, position + Vector2(-50.0, 0.0), str(item["text"]), HORIZONTAL_ALIGNMENT_CENTER, 100.0, 21, color)
 
 func _draw_arena_hud() -> void:
-	var left_color := simulation.left.accent
-	var right_color := simulation.right.accent
-	var left_bounds := health_hud_bounds(0)
-	var right_bounds := health_hud_bounds(1)
-	var left_health := "%d / %d" % [int(ceil(simulation.left.hp)), int(simulation.left.max_hp)]
-	var right_health := "%d / %d" % [int(ceil(simulation.right.hp)), int(simulation.right.max_hp)]
-	_draw_health_hud_panel(
-		left_bounds,
-		simulation.left.display_name,
-		left_health,
-		simulation.left.hp_ratio(),
-		left_color,
-		false
-	)
-	_draw_health_hud_panel(
-		right_bounds,
-		simulation.right.display_name,
-		right_health,
-		simulation.right.hp_ratio(),
-		right_color,
-		true
-	)
-	_draw_entity_hud(left_bounds, right_bounds)
-	draw_string(_font, Vector2(size.x * 0.5 - 48.0, 34.0), "%02d" % int(maxf(0.0, simulation.max_battle_time - simulation.elapsed)), HORIZONTAL_ALIGNMENT_CENTER, 96.0, 20, Color("e9eef2"))
+	var hud_bounds := {}
+	if simulation.teams.size() == 2 and simulation.battle_setup.mode == BattleSetupScript.MODE_DUEL:
+		var left_bounds := health_hud_bounds(0)
+		var right_bounds := health_hud_bounds(1)
+		var left_health := "%d / %d" % [int(ceil(simulation.left.hp)), int(simulation.left.max_hp)]
+		var right_health := "%d / %d" % [int(ceil(simulation.right.hp)), int(simulation.right.max_hp)]
+		_draw_health_hud_panel(left_bounds, simulation.left.display_name, left_health, simulation.left.hp_ratio(), simulation.left.accent, false)
+		_draw_health_hud_panel(right_bounds, simulation.right.display_name, right_health, simulation.right.hp_ratio(), simulation.right.accent, true)
+		hud_bounds[simulation.teams[0].team_id] = left_bounds
+		hud_bounds[simulation.teams[1].team_id] = right_bounds
+	else:
+		for team_index in range(simulation.teams.size()):
+			var team = simulation.teams[team_index]
+			var bounds := _team_hud_bounds(team_index, simulation.teams.size())
+			var lead = simulation.fighter_for_side(team.team_id)
+			var color: Color = lead.accent if lead != null else Color("89939d")
+			var remaining := simulation.team_remaining_hp(team)
+			var maximum := simulation.team_total_max_hp(team)
+			var roster_state := "%s · %d+%d" % [team.display_name, team.active_fighters.size(), team.queued_count()]
+			_draw_health_hud_panel(bounds, roster_state, "%d/%d" % [int(ceil(remaining)), int(ceil(maximum))], simulation.team_remaining_hp_ratio(team), color, false)
+			hud_bounds[team.team_id] = bounds
+	_draw_entity_hud(hud_bounds)
+	var timer_y := 34.0 if simulation.teams.size() == 2 else (102.0 if simulation.teams.size() > 4 else 76.0)
+	draw_string(_font, Vector2(size.x * 0.5 - 48.0, timer_y), "%02d" % int(maxf(0.0, simulation.max_battle_time - simulation.elapsed)), HORIZONTAL_ALIGNMENT_CENTER, 96.0, 20, Color("e9eef2"))
 
-func _draw_entity_hud(left_bounds: Rect2, right_bounds: Rect2) -> void:
+func _team_hud_bounds(team_index: int, team_count: int) -> Rect2:
+	var columns := mini(4, team_count)
+	var row := floori(float(team_index) / float(columns))
+	var column := team_index % columns
+	var gap := 8.0
+	var panel_width := (size.x - 26.0 - gap * float(columns - 1)) / float(columns)
+	var y := 17.0 + float(row) * 48.0
+	return Rect2(Vector2(13.0 + float(column) * (panel_width + gap), y), Vector2(panel_width, HEALTH_BAR_HEIGHT))
+
+func _draw_entity_hud(hud_bounds: Dictionary) -> void:
 	for entity in simulation.entities:
 		if entity.removed or entity.is_captured() or entity.owner_side < 0:
 			continue
-		var health_bar_bounds := left_bounds if entity.owner_side == 0 else right_bounds
-		entity.draw_hud(self, health_bar_bounds)
+		if hud_bounds.has(entity.owner_side):
+			entity.draw_hud(self, hud_bounds[entity.owner_side])
 
 func _draw_health_hud_panel(bounds: Rect2, display_name: String, health_text: String, ratio: float, color: Color, align_right: bool) -> void:
+	var panel_top := maxf(3.0, bounds.position.y - 28.0)
+	var panel_bottom := bounds.end.y + 3.0
 	var panel_bounds := Rect2(
-		Vector2(bounds.position.x - 6.0, 3.0),
-		Vector2(bounds.size.x + 12.0, bounds.end.y)
+		Vector2(bounds.position.x - 6.0, panel_top),
+		Vector2(bounds.size.x + 12.0, panel_bottom - panel_top)
 	)
 	var panel_outline := Color(color.r, color.g, color.b, 0.3)
 	draw_rect(panel_bounds, Color(0.012, 0.016, 0.022, 0.9))
 	draw_rect(panel_bounds, panel_outline, false, 1.5)
 
-	var name_width := 92.0
+	var name_width := minf(92.0, bounds.size.x * 0.44)
 	var value_width := bounds.size.x - name_width
 	var label_baseline := bounds.position.y - 7.0
 	var name_color := color.lerp(Color.WHITE, 0.32)
@@ -410,7 +452,9 @@ func _draw_border() -> void:
 func _draw_result_card() -> void:
 	draw_rect(Rect2(Vector2(70.0, size.y * 0.36), Vector2(size.x - 140.0, 168.0)), Color(0.01, 0.01, 0.015, 0.9))
 	var winner := simulation.winner()
-	_draw_centered_text(winner.display_name + " 获胜", size.y * 0.36 + 65.0, 38, winner.accent)
+	var winner_team = simulation.team_for_id(simulation.winner_team_id)
+	var winner_name: String = winner.display_name if simulation.battle_setup.mode == BattleSetupScript.MODE_DUEL else winner_team.display_name
+	_draw_centered_text(winner_name + " 获胜", size.y * 0.36 + 65.0, 38, winner.accent)
 	_draw_centered_text(simulation.finish_reason + " · %.1f 秒" % simulation.elapsed, size.y * 0.36 + 112.0, 24, Color("e8e8e8"))
 
 func _draw_centered_text(text: String, baseline_y: float, font_size: int, color: Color) -> void:

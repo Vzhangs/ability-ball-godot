@@ -65,8 +65,8 @@ func step(battle, delta: float) -> void:
 	battle.shake_camera(2.6)
 
 func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
-	var vampire = context.fighter_for_side(owner_side)
-	var victim = context.fighter_for_side(1 - owner_side)
+	var vampire = context.owner_for_entity(self)
+	var victim = context.opponent_for_entity(self)
 	if vampire == null or victim == null:
 		return
 	var direction: Vector2 = vampire.pos - victim.pos

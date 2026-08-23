@@ -30,6 +30,15 @@ func arena_size() -> Vector2:
 func fighter_for_side(side: int):
 	return _battle().fighter_for_side(side)
 
+func fighter_for_uid(fighter_uid: int):
+	return _battle().fighter_for_uid(fighter_uid)
+
+func active_fighters() -> Array:
+	return _battle().active_fighters()
+
+func hostile_fighters(side: int) -> Array:
+	return _battle().hostile_fighters(side)
+
 func opponent_for_side(side: int):
 	return _battle().opponent_for_side(side)
 

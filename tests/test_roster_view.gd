@@ -159,6 +159,8 @@ func _check_health_hud_policy() -> void:
 	_check(render_source.contains("pad=1080:1920:0:360:color=black"), "录制内容在 1080×1920 竖屏画布中上下等量补黑居中")
 	_check(not render_source.contains("scale=1080:1200"), "录制链路不再把低分辨率画面放大成 1080×1200")
 	_check(render_source.contains('--fixed-fps "$recording_fps"'), "视频生成脚本使用用户选择的录制帧率")
+	_check(render_source.contains('"--battle-mode=$battle_mode"'), "视频重演显式传递当前战斗模式")
+	_check(render_source.contains('"--team-rosters=$team_rosters"'), "视频重演显式传递全部阵营阵容")
 	_check(render_source.contains("cover_frame=$(( recording_fps * 6 ))"), "自动封面固定取对局第 6 秒画面")
 	_check(render_source.contains("colorkey=0x030405"), "封面标题抠除背景后作为透明前景覆盖内容区")
 	_check(render_source.contains("overlay=0:${cover_title_y}"), "封面对决标题叠放在竞技场内容区中央")
@@ -563,11 +565,11 @@ func _check_wind_swordsman_view() -> void:
 	var slash_source := FileAccess.get_file_as_string("res://scripts/balls/wind_swordsman/slash_effect_entity.gd")
 	var crack_source := FileAccess.get_file_as_string("res://scripts/balls/wind_swordsman/ground_crack_entity.gd")
 	var below_entities_index := battle_view_source.find("_draw_entities(false)")
-	var ball_index := battle_view_source.find("_draw_ball(simulation.left")
+	var ball_index := battle_view_source.find("_draw_ball(fighter, fighter_visuals")
 	var above_entities_index := battle_view_source.find("_draw_entities(true)")
 	_check(
 		below_entities_index >= 0 and below_entities_index < ball_index and ball_index < above_entities_index,
-		"公共视图按低层实体、球体、高层实体的顺序分层绘制"
+		"公共视图按低层实体、全部主球、高层实体的顺序分层绘制"
 	)
 	_check(slash_source.contains("func _draw_lens("), "风剑球斩击使用两端尖、中间宽的果核形绘制器")
 	_check(slash_source.contains("draw_colored_polygon"), "风剑球斩击通过多层填充轮廓形成实体光感")

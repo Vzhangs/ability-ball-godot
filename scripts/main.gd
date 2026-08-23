@@ -2,12 +2,14 @@ extends Control
 
 const BattleViewScript := preload("res://scripts/ui/battle_view.gd")
 const BattleSimulationScript := preload("res://scripts/simulation/battle_simulation.gd")
+const BattleSetupScript := preload("res://scripts/simulation/battle_setup.gd")
 const ProceduralAudioScript := preload("res://scripts/audio/procedural_audio.gd")
 const BallSettingsStoreScript := preload("res://scripts/settings/ball_settings_store.gd")
 const BallSettingsDialogScript := preload("res://scripts/ui/ball_settings_dialog.gd")
 const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
 const GlobalSettingsStoreScript := preload("res://scripts/settings/global_settings_store.gd")
 const GlobalSettingsDialogScript := preload("res://scripts/ui/global_settings_dialog.gd")
+const BattleSetupDialogScript := preload("res://scripts/ui/battle_setup_dialog.gd")
 const BattleLoggerScript := preload("res://scripts/logging/battle_logger.gd")
 const LOGICAL_VIEWPORT_SIZE := Vector2i(720, 1280)
 const BATTLE_VIEW_POSITION := Vector2(35.0, 190.0)
@@ -24,6 +26,8 @@ var recording_fps := GlobalGameSettingsScript.DEFAULT_RECORDING_FPS
 var result_reveal_delay_seconds := GlobalGameSettingsScript.DEFAULT_RESULT_REVEAL_DELAY
 var current_left_id := "vampire"
 var current_right_id := "wdc"
+var battle_mode := BattleSetupScript.MODE_DUEL
+var team_rosters: Array = []
 var speed_values := [1.0, 2.0, 4.0]
 var speed_index := 0
 
@@ -33,12 +37,18 @@ var speed_button: Button
 var result_label: Label
 var left_title_label: Label
 var right_title_label: Label
+var mode_title_label: Label
 var left_selector: OptionButton
 var right_selector: OptionButton
+var versus_label: Label
+var mode_selector: OptionButton
+var setup_button: Button
+var setup_summary_label: Label
 var record_button: MenuButton
 var procedural_audio: ProceduralBattleAudio
 var settings_dialog
 var global_settings_dialog
+var battle_setup_dialog
 var battle_logger: BattleLogger
 var recording_mode := false
 var _recording_quit_scheduled := false
@@ -65,6 +75,10 @@ func _ready() -> void:
 	seed_value = _seed_from_arguments(seed_value)
 	current_left_id = _ball_id_from_arguments("--left=", current_left_id)
 	current_right_id = _ball_id_from_arguments("--right=", current_right_id)
+	battle_mode = _battle_mode_from_arguments(battle_mode)
+	team_rosters = _team_rosters_from_arguments()
+	if team_rosters.is_empty():
+		_reset_default_rosters()
 	recording_fps = _recording_fps_from_arguments(recording_fps)
 	if not _startup_valid:
 		return
@@ -123,7 +137,7 @@ func _build_header() -> void:
 	title.add_theme_constant_override("separation", 18)
 	add_child(title)
 	left_title_label = _add_title_label(title, _module(current_left_id).display_name, _module(current_left_id).title_color, 44)
-	_add_title_label(title, "VS", Color.WHITE, 39)
+	mode_title_label = _add_title_label(title, "VS", Color.WHITE, 39)
 	right_title_label = _add_title_label(title, _module(current_right_id).display_name, _module(current_right_id).title_color, 44)
 
 func _add_title_label(parent: Container, text: String, color: Color, font_size: int) -> Label:
@@ -152,10 +166,9 @@ func _replace_battle_view(end_reason: String = "battle_replaced") -> void:
 	battle_view.size = BattleViewScript.DEFAULT_VIEW_SIZE
 	battle_view.result_reveal_delay_seconds = result_reveal_delay_seconds
 	add_child(battle_view)
-	battle_view.start_battle(
+	battle_view.start_battle_setup(
 		seed_value,
-		current_left_id,
-		current_right_id,
+		_current_battle_setup(),
 		time_limit_seconds,
 		battle_arena_size
 	)
@@ -167,12 +180,50 @@ func _replace_battle_view(end_reason: String = "battle_replaced") -> void:
 	_update_title()
 
 func _update_title() -> void:
-	if left_title_label == null or right_title_label == null:
+	if left_title_label == null or right_title_label == null or mode_title_label == null:
 		return
-	left_title_label.text = _module(current_left_id).display_name
-	left_title_label.add_theme_color_override("font_color", _module(current_left_id).title_color)
-	right_title_label.text = _module(current_right_id).display_name
-	right_title_label.add_theme_color_override("font_color", _module(current_right_id).title_color)
+	if battle_mode == BattleSetupScript.MODE_DUEL:
+		left_title_label.text = _module(current_left_id).display_name
+		left_title_label.add_theme_color_override("font_color", _module(current_left_id).title_color)
+		mode_title_label.text = "VS"
+		right_title_label.text = _module(current_right_id).display_name
+		right_title_label.add_theme_color_override("font_color", _module(current_right_id).title_color)
+	else:
+		left_title_label.text = "队伍 1（%d）" % team_rosters[0].size()
+		left_title_label.add_theme_color_override("font_color", _module(team_rosters[0][0]).title_color)
+		mode_title_label.text = _battle_mode_display_name()
+		if battle_mode == BattleSetupScript.MODE_FREE_FOR_ALL:
+			right_title_label.text = "%d 方" % team_rosters.size()
+			right_title_label.add_theme_color_override("font_color", Color("8ee7ff"))
+		else:
+			right_title_label.text = "队伍 2（%d）" % team_rosters[1].size()
+			right_title_label.add_theme_color_override("font_color", _module(team_rosters[1][0]).title_color)
+
+func _reset_default_rosters() -> void:
+	var fallback_third := "test_ball" if BallRegistry.has_id("test_ball") else BallRegistry.ids()[0]
+	team_rosters = [[current_left_id], [current_right_id], [fallback_third]] \
+		if battle_mode == BattleSetupScript.MODE_FREE_FOR_ALL \
+		else [[current_left_id], [current_right_id]]
+
+func _current_battle_setup():
+	match battle_mode:
+		BattleSetupScript.MODE_RELAY:
+			return BattleSetupScript.relay(team_rosters[0], team_rosters[1])
+		BattleSetupScript.MODE_FREE_FOR_ALL:
+			return BattleSetupScript.free_for_all(team_rosters)
+		BattleSetupScript.MODE_TEAM_BRAWL:
+			return BattleSetupScript.team_brawl(team_rosters[0], team_rosters[1])
+	return BattleSetupScript.duel(current_left_id, current_right_id)
+
+func _battle_mode_display_name() -> String:
+	match battle_mode:
+		BattleSetupScript.MODE_RELAY:
+			return "擂台"
+		BattleSetupScript.MODE_FREE_FOR_ALL:
+			return "自由混战"
+		BattleSetupScript.MODE_TEAM_BRAWL:
+			return "团队混战"
+	return "VS"
 
 func _build_result_label() -> void:
 	result_label = Label.new()
@@ -188,8 +239,38 @@ func _build_result_label() -> void:
 	add_child(result_label)
 
 func _build_controls() -> void:
+	var mode_controls := HBoxContainer.new()
+	mode_controls.position = Vector2(35.0, 946.0)
+	mode_controls.size = Vector2(650.0, 42.0)
+	mode_controls.alignment = BoxContainer.ALIGNMENT_CENTER
+	mode_controls.add_theme_constant_override("separation", 10)
+	add_child(mode_controls)
+	mode_selector = OptionButton.new()
+	mode_selector.custom_minimum_size = Vector2(170.0, 42.0)
+	for mode_entry in [
+		["单挑", BattleSetupScript.MODE_DUEL],
+		["擂台接力", BattleSetupScript.MODE_RELAY],
+		["多方混战", BattleSetupScript.MODE_FREE_FOR_ALL],
+		["双方大混战", BattleSetupScript.MODE_TEAM_BRAWL],
+	]:
+		mode_selector.add_item(mode_entry[0])
+		mode_selector.set_item_metadata(mode_selector.item_count - 1, mode_entry[1])
+		if mode_entry[1] == battle_mode:
+			mode_selector.select(mode_selector.item_count - 1)
+	mode_selector.item_selected.connect(_on_battle_mode_selected)
+	mode_controls.add_child(mode_selector)
+	setup_button = _make_button("设置阵容", Vector2(110.0, 42.0))
+	setup_button.pressed.connect(_open_battle_setup)
+	mode_controls.add_child(setup_button)
+	setup_summary_label = Label.new()
+	setup_summary_label.custom_minimum_size = Vector2(330.0, 42.0)
+	setup_summary_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	setup_summary_label.add_theme_font_size_override("font_size", 15)
+	setup_summary_label.add_theme_color_override("font_color", Color("8f9aa3"))
+	mode_controls.add_child(setup_summary_label)
+
 	var selectors := HBoxContainer.new()
-	selectors.position = Vector2(35.0, 985.0)
+	selectors.position = Vector2(35.0, 994.0)
 	selectors.size = Vector2(650.0, 50.0)
 	selectors.alignment = BoxContainer.ALIGNMENT_CENTER
 	selectors.add_theme_constant_override("separation", 9)
@@ -197,14 +278,14 @@ func _build_controls() -> void:
 
 	left_selector = _make_selector(current_left_id)
 	selectors.add_child(left_selector)
-	var versus := Label.new()
-	versus.text = "VS"
-	versus.custom_minimum_size = Vector2(42.0, 46.0)
-	versus.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	versus.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	versus.add_theme_font_size_override("font_size", 18)
-	versus.add_theme_color_override("font_color", Color("8f9aa3"))
-	selectors.add_child(versus)
+	versus_label = Label.new()
+	versus_label.text = "VS"
+	versus_label.custom_minimum_size = Vector2(42.0, 46.0)
+	versus_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	versus_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	versus_label.add_theme_font_size_override("font_size", 18)
+	versus_label.add_theme_color_override("font_color", Color("8f9aa3"))
+	selectors.add_child(versus_label)
 	right_selector = _make_selector(current_right_id)
 	selectors.add_child(right_selector)
 	var fight_button := _make_button("开始对战", Vector2(108.0, 46.0))
@@ -219,7 +300,7 @@ func _build_controls() -> void:
 	selectors.add_child(record_button)
 
 	var controls := HBoxContainer.new()
-	controls.position = Vector2(35.0, 1042.0)
+	controls.position = Vector2(35.0, 1051.0)
 	controls.size = Vector2(650.0, 52.0)
 	controls.alignment = BoxContainer.ALIGNMENT_CENTER
 	controls.add_theme_constant_override("separation", 8)
@@ -257,6 +338,7 @@ func _build_controls() -> void:
 	var settings_button := _make_button("球参数", Vector2(76.0, 46.0))
 	settings_button.pressed.connect(_open_ball_settings)
 	controls.add_child(settings_button)
+	_refresh_mode_controls()
 
 func _make_selector(selected_id: String) -> OptionButton:
 	var selector := OptionButton.new()
@@ -271,13 +353,61 @@ func _make_selector(selected_id: String) -> OptionButton:
 	return selector
 
 func _start_selected_match() -> void:
-	current_left_id = String(left_selector.get_item_metadata(left_selector.selected))
-	current_right_id = String(right_selector.get_item_metadata(right_selector.selected))
+	if battle_mode == BattleSetupScript.MODE_DUEL:
+		current_left_id = String(left_selector.get_item_metadata(left_selector.selected))
+		current_right_id = String(right_selector.get_item_metadata(right_selector.selected))
 	seed_value = _parse_seed(seed_edit.text, seed_value)
 	_recording_quit_scheduled = false
 	result_label.text = ""
 	_replace_battle_view("selection_changed")
 	pause_button.text = "暂停"
+
+func _on_battle_mode_selected(index: int) -> void:
+	if left_selector != null and left_selector.selected >= 0:
+		current_left_id = String(left_selector.get_item_metadata(left_selector.selected))
+	if right_selector != null and right_selector.selected >= 0:
+		current_right_id = String(right_selector.get_item_metadata(right_selector.selected))
+	battle_mode = String(mode_selector.get_item_metadata(index))
+	_reset_default_rosters()
+	_refresh_mode_controls()
+	_recording_quit_scheduled = false
+	result_label.text = ""
+	_replace_battle_view("battle_mode_changed")
+
+func _open_battle_setup() -> void:
+	if battle_mode == BattleSetupScript.MODE_DUEL:
+		return
+	if battle_setup_dialog == null:
+		battle_setup_dialog = BattleSetupDialogScript.new()
+		battle_setup_dialog.setup_submitted.connect(_on_battle_setup_submitted)
+		add_child(battle_setup_dialog)
+	battle_setup_dialog.open_config(battle_mode, team_rosters)
+
+func _on_battle_setup_submitted(mode: String, rosters: Array) -> void:
+	battle_mode = mode
+	team_rosters = rosters.duplicate(true)
+	current_left_id = String(team_rosters[0][0])
+	current_right_id = String(team_rosters[1][0])
+	_refresh_mode_controls()
+	result_label.text = "阵容已应用"
+	_replace_battle_view("battle_rosters_changed")
+
+func _refresh_mode_controls() -> void:
+	if setup_button == null:
+		return
+	var uses_rosters := battle_mode != BattleSetupScript.MODE_DUEL
+	setup_button.disabled = not uses_rosters
+	left_selector.disabled = uses_rosters
+	right_selector.disabled = uses_rosters
+	versus_label.text = "VS" if not uses_rosters else _battle_mode_display_name()
+	if not uses_rosters:
+		setup_summary_label.text = "选择双方球种后开始"
+	else:
+		var counts: Array[String] = []
+		for roster in team_rosters:
+			counts.append(str(roster.size()))
+		setup_summary_label.text = "%d 队 · 阵容 %s" % [team_rosters.size(), "/".join(counts)]
+	_update_title()
 
 func _make_button(text: String, minimum_size: Vector2) -> Button:
 	var button := Button.new()
@@ -321,7 +451,9 @@ func _record_current_battle() -> void:
 	var recording_left_id: String = battle_view.simulation.left.id
 	var recording_right_id: String = battle_view.simulation.right.id
 	var recording_time_limit := int(round(battle_view.simulation.max_battle_time))
-	_recording_output_path = _video_output_path(recording_seed, recording_left_id, recording_right_id)
+	var recording_mode_id: String = battle_view.simulation.battle_setup.mode
+	var recording_rosters := _encoded_team_rosters(battle_view.simulation.battle_setup.teams)
+	_recording_output_path = _video_output_path(recording_seed, recording_left_id, recording_right_id, recording_mode_id, recording_rosters)
 	_recording_previous_modified_time = FileAccess.get_modified_time(_recording_output_path) \
 		if FileAccess.file_exists(_recording_output_path) else 0
 	var shell_path := OS.get_environment("SHELL")
@@ -335,6 +467,8 @@ func _record_current_battle() -> void:
 		recording_right_id,
 		str(recording_time_limit),
 		str(recording_fps),
+		recording_mode_id,
+		recording_rosters,
 	])
 	_recording_process_id = OS.create_process(shell_path, arguments)
 	if _recording_process_id <= 0:
@@ -344,11 +478,20 @@ func _record_current_battle() -> void:
 	record_button.text = "录制中…"
 	result_label.text = "正在后台录制本局…"
 
-func _video_output_path(seed: int, left_ball_id: String, right_ball_id: String) -> String:
-	var output_slug := "ability-ball-seed-%d" % seed
-	if left_ball_id != "vampire" or right_ball_id != "wdc":
-		output_slug = "ability-ball-%s-vs-%s-seed-%d" % [left_ball_id, right_ball_id, seed]
+func _video_output_path(video_seed: int, left_ball_id: String, right_ball_id: String, mode: String = BattleSetupScript.MODE_DUEL, rosters: String = "") -> String:
+	var output_slug := "ability-ball-seed-%d" % video_seed
+	if mode != BattleSetupScript.MODE_DUEL:
+		var safe_rosters := rosters.replace("|", "-vs-").replace(",", "-").left(96)
+		output_slug = "ability-ball-%s-%s-seed-%d" % [mode, safe_rosters, video_seed]
+	elif left_ball_id != "vampire" or right_ball_id != "wdc":
+		output_slug = "ability-ball-%s-vs-%s-seed-%d" % [left_ball_id, right_ball_id, video_seed]
 	return ProjectSettings.globalize_path("res://builds/%s.mp4" % output_slug)
+
+func _encoded_team_rosters(setup_teams: Array) -> String:
+	var encoded: Array[String] = []
+	for team_spec in setup_teams:
+		encoded.append(",".join(team_spec["roster"]))
+	return "|".join(encoded)
 
 func _battle_view_position() -> Vector2:
 	return RECORDING_BATTLE_VIEW_POSITION if recording_mode else BATTLE_VIEW_POSITION
@@ -423,7 +566,9 @@ func _build_footer() -> void:
 
 func _on_battle_finished(simulation) -> void:
 	_finish_battle_log("completed", simulation.finish_reason)
-	var winner_name: String = simulation.winner().display_name
+	var winner_name: String = simulation.winner().display_name \
+		if simulation.battle_setup.mode == BattleSetupScript.MODE_DUEL \
+		else simulation.team_for_id(simulation.winner_team_id).display_name
 	result_label.text = "%s获胜 · %s · 种子 %d" % [winner_name, simulation.finish_reason, simulation.seed_value]
 	if recording_mode and not _recording_quit_scheduled:
 		_recording_quit_scheduled = true
@@ -477,10 +622,9 @@ func _start_seed(value: int, end_reason: String) -> void:
 	_recording_quit_scheduled = false
 	seed_edit.text = str(seed_value)
 	result_label.text = ""
-	battle_view.start_battle(
+	battle_view.start_battle_setup(
 		seed_value,
-		current_left_id,
-		current_right_id,
+		_current_battle_setup(),
 		time_limit_seconds,
 		battle_arena_size
 	)
@@ -516,6 +660,43 @@ func _recording_fps_from_arguments(fallback: int) -> int:
 				return clampi(value.to_int(), 24, 120)
 	return fallback
 
+func _battle_mode_from_arguments(fallback: String) -> String:
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--battle-mode="):
+			var requested_mode := argument.trim_prefix("--battle-mode=")
+			if requested_mode in BattleSetupScript.SUPPORTED_MODES:
+				return requested_mode
+			_fail_startup("未知对战模式：%s" % requested_mode)
+	return fallback
+
+func _team_rosters_from_arguments() -> Array:
+	if battle_mode == BattleSetupScript.MODE_DUEL:
+		return []
+	for argument in OS.get_cmdline_user_args():
+		if not argument.begins_with("--team-rosters="):
+			continue
+		var rosters: Array = []
+		for raw_team in argument.trim_prefix("--team-rosters=").split("|", false):
+			var roster: Array[String] = []
+			for raw_ball_id in raw_team.split(",", false):
+				var ball_id := raw_ball_id.strip_edges()
+				if not ball_id.is_empty():
+					roster.append(ball_id)
+			rosters.append(roster)
+		var setup = null
+		match battle_mode:
+			BattleSetupScript.MODE_RELAY:
+				if rosters.size() == 2: setup = BattleSetupScript.relay(rosters[0], rosters[1])
+			BattleSetupScript.MODE_FREE_FOR_ALL:
+				setup = BattleSetupScript.free_for_all(rosters)
+			BattleSetupScript.MODE_TEAM_BRAWL:
+				if rosters.size() == 2: setup = BattleSetupScript.team_brawl(rosters[0], rosters[1])
+		if setup == null or not setup.is_valid():
+			_fail_startup("命令行阵容无效：%s" % argument)
+			return []
+		return rosters
+	return []
+
 func _start_battle_log() -> void:
 	if battle_logger == null or battle_view == null or battle_view.simulation == null:
 		return
@@ -529,7 +710,9 @@ func _start_battle_log() -> void:
 			"video_output_path": _video_output_path(
 				simulation.seed_value,
 				simulation.left.id,
-				simulation.right.id
+				simulation.right.id,
+				simulation.battle_setup.mode,
+				_encoded_team_rosters(simulation.battle_setup.teams)
 			) if recording_mode else "",
 		},
 		"view": {

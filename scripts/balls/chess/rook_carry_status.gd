@@ -49,7 +49,9 @@ func resolve_wall_impact(battle, target) -> float:
 		return 0.0
 	_wall_impact_resolved = true
 	remaining = 0.0
-	var source = battle.fighter_for_side(source_side)
+	var source = battle.fighter_for_uid(source_fighter_uid)
+	if source == null:
+		source = battle.fighter_for_side(source_side)
 	var applied: float = battle.damage(target, _wall_damage, _accent, source)
 	battle.spawn_ring(target.pos, Color.WHITE, target.radius * 0.35, target.radius * 3.2, 0.42)
 	battle.spawn_ring(target.pos, _accent, target.radius * 0.8, target.radius * 2.5, 0.34)

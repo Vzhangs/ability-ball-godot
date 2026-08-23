@@ -171,7 +171,7 @@ func _check_public_view_only_draws_generic_contracts() -> void:
 	for feature_renderer in ["_draw_fire_zones", "_draw_gravity_wells", "_draw_anchors", "_draw_projectiles"]:
 		_check(not source.contains(feature_renderer), "公共视图不得包含球种实体绘制器：%s" % feature_renderer)
 	_check(source.contains("entity.draw(self, context)"), "公共视图通过 BallEntity 契约绘制附属物")
-	_check(source.contains("entity.draw_hud(self, health_bar_bounds)"), "公共视图通过 BallEntity 契约绘制实体 HUD")
+	_check(source.contains("entity.draw_hud(self, hud_bounds[entity.owner_side])"), "公共视图通过 BallEntity 契约绘制实体 HUD")
 	_check(source.contains("effect.draw_overlay(self, fighter, context)"), "公共视图通过 BallStatusEffect 契约绘制状态")
 	_check(source.contains("effect.draw_topmost_overlay(self, fighter, context)"), "公共视图通过状态契约统一绘制最上层标识")
 
@@ -180,7 +180,10 @@ func _check_single_engine_entrypoint() -> void:
 	for file_name in DirAccess.get_files_at("res://scripts/simulation"):
 		if file_name.ends_with(".gd"):
 			simulation_files.append(file_name)
-	_check(simulation_files == PackedStringArray(["battle_simulation.gd"]), "运行时只保留一个战斗模拟器")
+	_check(
+		simulation_files == PackedStringArray(["battle_setup.gd", "battle_simulation.gd"]),
+		"运行时只保留一个战斗模拟器和一份无玩法分支的模式设置"
+	)
 	var main_source := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_check(not main_source.contains("_is_reference_match"), "入口不得按具体球组合切换引擎")
 	_check(not main_source.contains("simulation is"), "入口不得按模拟器类型分支")
