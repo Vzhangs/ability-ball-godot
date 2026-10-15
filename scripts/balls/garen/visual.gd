@@ -47,9 +47,7 @@ func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var perpendicular := direction.orthogonal()
 
 	canvas.draw_circle(position + Vector2(0.0, radius * 0.12), radius * 1.02, Color(0.0, 0.0, 0.0, 0.34))
-	canvas.draw_circle(position, radius, BLUE_DARK)
-	canvas.draw_circle(position, radius * 0.91, BLUE_MID)
-	canvas.draw_circle(position + Vector2(-radius * 0.18, -radius * 0.22), radius * 0.58, BLUE_LIGHT)
+	Surface.draw(canvas, position, radius, BLUE_MID, BLUE_LIGHT, Surface.Style.METAL, context["elapsed"])
 
 	var shield := PackedVector2Array([
 		position + Vector2(-radius * 0.48, -radius * 0.42),
@@ -117,11 +115,22 @@ func _draw_blade(
 		shoulder + perpendicular * half_width,
 		blade_start + perpendicular * half_width * 0.78,
 	])
-	canvas.draw_line(
-		blade_start,
-		tip,
-		Color(GOLD_LIGHT.r, GOLD_LIGHT.g, GOLD_LIGHT.b, 0.18 * alpha),
-		width * 1.85,
+	var glow_half_width := half_width * 1.24
+	var blade_glow := PackedVector2Array([
+		blade_start - perpendicular * glow_half_width * 0.72,
+		shoulder - perpendicular * glow_half_width,
+		tip + direction * width * 0.06,
+		shoulder + perpendicular * glow_half_width,
+		blade_start + perpendicular * glow_half_width * 0.72,
+	])
+	canvas.draw_colored_polygon(
+		blade_glow,
+		Color(GOLD_LIGHT.r, GOLD_LIGHT.g, GOLD_LIGHT.b, 0.055 * alpha)
+	)
+	canvas.draw_polyline(
+		_closed(blade_glow),
+		Color(GOLD_LIGHT.r, GOLD_LIGHT.g, GOLD_LIGHT.b, 0.14 * alpha),
+		maxf(0.8, width * 0.07),
 		true
 	)
 	canvas.draw_colored_polygon(blade, Color(STEEL_MID.r, STEEL_MID.g, STEEL_MID.b, alpha))

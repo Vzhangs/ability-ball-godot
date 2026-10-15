@@ -5,8 +5,12 @@ const LatchTetherEntity := preload("res://scripts/balls/vampire/latch_tether_ent
 const LatchInvulnerabilityEffect := preload("res://scripts/balls/vampire/latch_invulnerability_effect.gd")
 const LatchDragEffect := preload("res://scripts/balls/vampire/latch_drag_effect.gd")
 const LatchReleaseEffect := preload("res://scripts/balls/vampire/latch_release_effect.gd")
+const EPSILON := 0.0001
+const MOVEMENT_PRIORITY := BallStatusEffect.MOVEMENT_CONTROL_PRIORITY_ABILITY
 
 var _facing_direction := Vector2.RIGHT
+var _incoming_velocity := Vector2.ZERO
+var _incoming_velocity_ready := false
 var _latch_remaining := 0.0
 var _latch_tick_remaining := 0.0
 var _latched_opponent_velocity := Vector2.ZERO
@@ -15,6 +19,8 @@ var _latched_entity_ref: WeakRef
 var _latch_tether: BallEntity
 
 func on_battle_started(_battle, fighter, opponent, _side: int) -> void:
+	_incoming_velocity = Vector2.ZERO
+	_incoming_velocity_ready = false
 	_latch_remaining = 0.0
 	_latch_tick_remaining = 0.0
 	_latched_opponent_velocity = Vector2.ZERO
@@ -27,6 +33,7 @@ func on_battle_started(_battle, fighter, opponent, _side: int) -> void:
 
 func before_motion(battle, fighter, opponent, side: int, delta: float) -> void:
 	if _latch_remaining <= 0.0:
+		_capture_incoming_velocity(battle, fighter)
 		_update_facing(fighter, opponent)
 		return
 	battle.apply_status(fighter, LatchInvulnerabilityEffect.new(_latch_remaining + delta, side))
@@ -96,6 +103,7 @@ func after_contact(battle, fighter, opponent, _damage_dealt: float) -> void:
 	_latch_tick_remaining = maxf(0.001, settingf("latch_drain_interval"))
 	_latched_opponent_velocity = opponent.velocity
 	var side: int = battle.side_for_fighter(fighter)
+	_restore_incoming_velocity(battle, fighter)
 	battle.apply_status(fighter, LatchInvulnerabilityEffect.new(_latch_remaining, side))
 	battle.apply_status(opponent, LatchDragEffect.new(_latch_remaining, side))
 	_latch_tether = LatchTetherEntity.new(side, _latch_remaining, fighter.accent)
@@ -116,8 +124,7 @@ func after_entity_contact(
 	if (
 		_latch_remaining > 0.0
 		or fighter.hp <= 0.0
-		or entity == null
-		or not entity.can_receive_attack(side)
+		or not _is_entity_latch_target_valid(entity, side)
 	):
 		return
 	_latch_remaining = settingf("latch_duration")
@@ -126,6 +133,7 @@ func after_entity_contact(
 	_latch_tick_remaining = maxf(0.001, settingf("latch_drain_interval"))
 	_latched_entity_velocity = entity.velocity
 	_latched_entity_ref = weakref(entity)
+	_restore_incoming_velocity(battle, fighter)
 	battle.apply_status(fighter, LatchInvulnerabilityEffect.new(_latch_remaining, side))
 	_latch_tether = LatchTetherEntity.new(side, _latch_remaining, fighter.accent, entity)
 	battle.add_entity(_latch_tether)
@@ -135,6 +143,17 @@ func after_entity_contact(
 	battle.spawn_particles(entity.pos, fighter.accent, 9, 92.0)
 	battle.record_stat("vampire_latches")
 	battle.record_stat("vampire_entity_latches")
+
+func after_wall_hit(
+	battle,
+	fighter,
+	_opponent,
+	_side: int,
+	_contact_position: Vector2
+) -> bool:
+	if _latch_remaining <= 0.0:
+		_capture_incoming_velocity(battle, fighter)
+	return false
 
 func facing_direction() -> Vector2:
 	return _facing_direction
@@ -170,6 +189,8 @@ func _perform_entity_latch_drain(
 	entity: BallEntity,
 	side: int
 ) -> float:
+	if not _is_entity_latch_target_valid(entity, side):
+		return 0.0
 	var applied: float = battle.damage_entity(
 		entity,
 		settingf("latch_drain_damage"),
@@ -197,6 +218,8 @@ func _maintain_latch(battle, fighter, opponent) -> void:
 	opponent.velocity = fighter.velocity
 
 func _maintain_entity_latch(battle, fighter, entity: BallEntity) -> void:
+	if not _is_entity_latch_target_valid(entity, battle.side_for_fighter(fighter)):
+		return
 	var distance: float = fighter.radius + entity.radius + settingf("latch_gap")
 	var target_position: Vector2 = fighter.pos + _facing_direction * distance
 	var arena_size: Vector2 = battle.arena_size()
@@ -276,7 +299,7 @@ func _end_entity_latch(
 ) -> void:
 	if fighter != null:
 		battle.remove_status(fighter, LatchInvulnerabilityEffect.STATUS_KEY)
-	if fighter != null and entity != null and not entity.removed:
+	if fighter != null and entity != null and not entity.removed and not entity.is_terrain():
 		if release_both:
 			var release_direction: Vector2 = entity.pos - fighter.pos
 			if release_direction.length_squared() <= 0.0001:
@@ -314,7 +337,26 @@ func _latched_entity() -> BallEntity:
 	return _latched_entity_ref.get_ref() as BallEntity
 
 func _is_entity_latch_target_valid(entity: BallEntity, side: int) -> bool:
-	return entity != null and not entity.removed and entity.can_receive_attack(side)
+	return entity != null and not entity.removed and not entity.is_terrain() and entity.can_receive_attack(side)
+
+func _capture_incoming_velocity(battle, fighter) -> void:
+	if battle.movement_control_priority(fighter) > MOVEMENT_PRIORITY:
+		_incoming_velocity_ready = false
+		return
+	if fighter.velocity.length_squared() <= EPSILON:
+		_incoming_velocity_ready = false
+		return
+	_incoming_velocity = fighter.velocity
+	_incoming_velocity_ready = true
+
+func _restore_incoming_velocity(battle, fighter) -> void:
+	var can_restore: bool = (
+		_incoming_velocity_ready
+		and battle.movement_control_priority(fighter) <= MOVEMENT_PRIORITY
+	)
+	_incoming_velocity_ready = false
+	if can_restore:
+		fighter.velocity = _incoming_velocity
 
 func _update_facing(fighter, opponent) -> void:
 	if opponent == null:

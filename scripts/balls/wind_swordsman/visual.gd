@@ -23,8 +23,7 @@ func draw_underlay(canvas: CanvasItem, _fighter, context: Dictionary) -> void:
 func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var position: Vector2 = context["position"]
 	var radius: float = context["radius"]
-	canvas.draw_circle(position, radius, fighter.color)
-	canvas.draw_circle(position, radius * 0.82, Color("0b3445"))
+	Surface.draw(canvas, position, radius, fighter.color, fighter.accent, Surface.Style.GRADIENT, context["elapsed"])
 	canvas.draw_circle(position, radius, fighter.accent, false, 2.5)
 	canvas.draw_arc(position, radius * 0.58, -PI * 0.78, PI * 0.32, 22, Color("d6feff"), 3.2, true)
 	canvas.draw_arc(position, radius * 0.38, PI * 0.16, PI * 1.18, 18, Color("55d8e8"), 2.2, true)

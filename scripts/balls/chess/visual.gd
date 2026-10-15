@@ -3,6 +3,7 @@ extends BallVisual
 const FACE_COLOR := Color("f1d59a")
 const FACE_SHADOW := Color("c89955")
 const INK_COLOR := Color("8d1618")
+const CjkFontProviderScript := preload("res://scripts/ui/cjk_font_provider.gd")
 
 func trail_alpha() -> float:
 	return 0.28
@@ -104,16 +105,16 @@ func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var position: Vector2 = context["position"]
 	var radius: float = context["radius"]
 	canvas.draw_circle(position, radius * 1.12, Color(1.0, 0.52, 0.18, 0.18))
-	canvas.draw_circle(position, radius, fighter.color)
+	Surface.draw(canvas, position, radius, fighter.color, fighter.accent, Surface.Style.METAL, context["elapsed"])
 	canvas.draw_circle(position, radius * 0.82, FACE_SHADOW)
-	canvas.draw_circle(position, radius * 0.72, FACE_COLOR)
+	Surface.draw(canvas, position, radius * 0.72, FACE_COLOR, FACE_COLOR.lightened(0.2), Surface.Style.SOLID, context["elapsed"])
 	canvas.draw_circle(position, radius, fighter.accent, false, maxf(2.2, radius * 0.085))
 	canvas.draw_circle(position, radius * 0.72, INK_COLOR, false, maxf(1.4, radius * 0.055))
 	var font_size := clampi(int(radius * 1.04), 23, 48)
 	var text_bounds := radius * 1.5
 	var baseline := position + Vector2(-text_bounds * 0.5, font_size * 0.34)
 	canvas.draw_string(
-		ThemeDB.fallback_font,
+		CjkFontProviderScript.font(),
 		baseline + Vector2(1.5, 1.5),
 		"棋",
 		HORIZONTAL_ALIGNMENT_CENTER,
@@ -122,7 +123,7 @@ func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 		Color(0.1, 0.015, 0.01, 0.48)
 	)
 	canvas.draw_string(
-		ThemeDB.fallback_font,
+		CjkFontProviderScript.font(),
 		baseline,
 		"棋",
 		HORIZONTAL_ALIGNMENT_CENTER,

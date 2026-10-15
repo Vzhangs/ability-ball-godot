@@ -33,6 +33,18 @@ func fighter_for_side(side: int):
 func fighter_for_uid(fighter_uid: int):
 	return _battle().fighter_for_uid(fighter_uid)
 
+func owner_for_entity(entity: BallEntity):
+	if entity == null:
+		return null
+	var owner = fighter_for_uid(entity.owner_fighter_uid)
+	return owner if owner != null else fighter_for_side(entity.owner_side)
+
+func opponent_for_fighter(source):
+	return _battle().nearest_hostile_fighter(source)
+
+func opponent_for_entity(entity: BallEntity):
+	return opponent_for_fighter(owner_for_entity(entity))
+
 func active_fighters() -> Array:
 	return _battle().active_fighters()
 
@@ -45,17 +57,21 @@ func opponent_for_side(side: int):
 func side_for_fighter(fighter) -> int:
 	return _battle().side_for_fighter(fighter)
 
-func damage(target, amount: float, color: Color, source, show_text: bool = true) -> float:
-	return _battle().damage(target, amount, color, source, show_text)
+func damage(target, amount: float, color: Color, source, show_text: bool = true, source_unit = null) -> float:
+	return _battle().damage(target, amount, color, source, show_text, source_unit)
 
 func damage_entity(
 	target: BallEntity,
 	amount: float,
 	color: Color,
 	source_side: int,
-	show_text: bool = true
+	show_text: bool = true,
+	source_unit = null
 ) -> float:
-	return _battle().damage_entity(target, amount, color, source_side, show_text)
+	return _battle().damage_entity(target, amount, color, source_side, show_text, source_unit)
+
+func record_entity_health_loss(target: BallEntity, applied: float) -> void:
+	_battle().record_entity_health_loss(target, applied)
 
 func damageable_entities(source_side: int) -> Array[BallEntity]:
 	var result: Array[BallEntity] = []
@@ -93,6 +109,9 @@ func contact_damage_for_side(source_side: int, target) -> float:
 func movement_control_priority(fighter) -> int:
 	return _battle().movement_control_priority(fighter)
 
+func request_world_stop(duration: float, source) -> bool:
+	return _battle().request_world_stop(duration, source)
+
 func heal(fighter, amount: float, allow_overheal: bool = false) -> float:
 	return _battle().heal(fighter, amount, allow_overheal)
 
@@ -108,9 +127,8 @@ func spawn_text(text: String, position: Vector2, color: Color, duration: float) 
 func add_beam(from: Vector2, to: Vector2, color: Color, duration: float, width: float) -> void:
 	_battle().add_beam(from, to, color, duration, width)
 
-func add_projectile(owner_side: int, position: Vector2, velocity: Vector2, radius: float, projectile_damage: float, color: Color, duration: float, type: String) -> void:
-	_battle().add_projectile(owner_side, position, velocity, radius, projectile_damage, color, duration, type)
-
+func add_projectile(owner_side: int, position: Vector2, velocity: Vector2, radius: float, projectile_damage: float, color: Color, duration: float, type: String, source_unit: BallEntity = null) -> void:
+	_battle().add_projectile(owner_side, position, velocity, radius, projectile_damage, color, duration, type, source_unit)
 
 func record_stat(key: String, amount: int = 1) -> void:
 	_battle().record_stat(key, amount)

@@ -14,7 +14,7 @@ func _init() -> void:
 		"speed": 172.0,
 		"radius": 30.0,
 		"cooldown": 6.3,
-		"ability": "远域捕获敌方附属物 · 原色轨道 · 事件视界吞噬",
+		"ability": "黑洞球会周期性展开黑洞。靠近的敌方主球会被拉入不断收紧的旋转轨道，并在受牵引撞墙时受到伤害。\n\n• 子弹、分身、植物、蛛丝和列车等敌方附属物进入捕获范围后会立刻失去行动，随后被黑洞吞噬。\n• 黑洞只捕获和吞噬，不会夺取这些附属物的所有权。",
 		"sound_kind": "judgment",
 		"sort_order": 40,
 		"tuning": {
@@ -29,7 +29,7 @@ func _init() -> void:
 			"capture_shrink_speed_max": {"label": "捕获收缩最高速度", "default": 138.0, "min": 1.0, "max": 1500.0, "step": 1.0, "order": 190},
 			"capture_angular_speed_min": {"label": "捕获最低角速度", "default": 1.35, "min": 0.0, "max": 20.0, "step": 0.05, "order": 200},
 			"capture_angular_speed_max": {"label": "捕获最高角速度", "default": 4.8, "min": 0.0, "max": 30.0, "step": 0.1, "order": 210},
-			"absorption_duration": {"label": "吞噬消失时长", "default": 0.3, "min": 0.05, "max": 5.0, "step": 0.05, "order": 220, "suffix": " 秒"},
+			"absorption_duration": {"label": "吞噬消失时长", "default": 0.2, "min": 0.05, "max": 5.0, "step": 0.05, "order": 220, "suffix": " 秒"},
 			"orbit_gap": {"label": "最终轨道间距", "group": "本体牵引", "default": 42.0, "min": 0.0, "max": 200.0, "step": 1.0, "order": 310},
 			"orbit_tangent_speed": {"label": "轨道切向速度", "group": "本体牵引", "default": 256.0, "min": 0.0, "max": 1000.0, "step": 1.0, "order": 320},
 			"orbit_radial_response": {"label": "轨道径向响应", "group": "本体牵引", "default": 2.9, "min": 0.0, "max": 20.0, "step": 0.1, "order": 330},
@@ -43,7 +43,7 @@ func _init() -> void:
 			"orbit_centripetal_scale": {"label": "向心加速度倍率", "group": "本体牵引", "default": 0.18, "min": 0.0, "max": 5.0, "step": 0.01, "order": 410},
 			"max_tether_speed": {"label": "牵引最高速度", "group": "本体牵引", "default": 465.0, "min": 20.0, "max": 1500.0, "step": 5.0, "order": 420},
 			"tether_speed_buffer": {"label": "牵引速度缓冲", "group": "本体牵引", "default": 56.0, "min": 0.0, "max": 500.0, "step": 1.0, "order": 430},
-			"wall_damage": {"label": "牵引撞墙伤害", "group": "本体牵引", "default": 15.0, "min": 0.0, "max": 500.0, "step": 0.5, "order": 440},
-			"wall_damage_interval": {"label": "撞墙伤害间隔", "group": "本体牵引", "default": 0.24, "min": 0.05, "max": 5.0, "step": 0.01, "order": 450, "suffix": " 秒"},
+			"wall_damage": {"label": "牵引撞墙伤害", "group": "本体牵引", "default": 8.0, "min": 0.0, "max": 500.0, "step": 0.5, "order": 440},
+			"wall_damage_interval": {"label": "撞墙伤害间隔", "group": "本体牵引", "default": 0.5, "min": 0.05, "max": 5.0, "step": 0.01, "order": 450, "suffix": " 秒"},
 		},
 	}, AbilityScript, VisualScript)

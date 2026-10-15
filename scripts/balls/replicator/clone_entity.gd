@@ -1,5 +1,8 @@
 extends BallEntity
 
+func combat_category() -> Dictionary:
+	return {"id": "replicator_cannon", "name": "浮游炮"}
+
 var _owner
 var _ability
 var _formation_slot := 0
@@ -58,6 +61,9 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	canvas.draw_circle(position, clone_radius, clone_color)
 	canvas.draw_circle(position, clone_radius, accent_color, false, 1.2)
 	canvas.draw_rect(Rect2(position - Vector2.ONE * clone_radius * 0.42, Vector2.ONE * clone_radius * 0.84), Color(0.88, 1.0, 0.96, 0.72), false, 1.0)
+
+func team_marker_world_height() -> float:
+	return radius * 1.3
 
 func is_absorbable() -> bool:
 	return true

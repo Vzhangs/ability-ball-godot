@@ -25,7 +25,9 @@ func _init(
 
 func step(battle, delta: float) -> void:
 	_age = minf(_aim_duration + LINGER_DURATION, _age + delta)
-	pos = battle.opponent_for_side(owner_side).pos
+	var target = battle.opponent_for_entity(self)
+	if target != null:
+		pos = target.pos
 
 func animation_progress() -> float:
 	return clampf(_age / _aim_duration, 0.0, 1.0)

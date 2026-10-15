@@ -33,6 +33,17 @@ func speed_multiplier(_battle, _fighter, _opponent, _side: int) -> float:
 func on_step(_battle, _fighter, _opponent, _side: int, _delta: float) -> void:
 	pass
 
+## Called only for the ability that owns an active world stop. Gameplay remains
+## frozen; this hook may advance the owner's transformation presentation only.
+func on_world_stop_step(
+	_battle,
+	_fighter,
+	_opponent,
+	_side: int,
+	_delta: float
+) -> void:
+	pass
+
 func activate(_battle, _fighter, _opponent, _side: int) -> void:
 	pass
 

@@ -55,17 +55,26 @@ func step(battle, delta: float) -> void:
 			battle.spawn_ring(pos, ownership_visual_color(_color), radius, 48.0, 0.38)
 			battle.spawn_particles(pos, ownership_visual_color(_color), 7, 78.0)
 		return
-	var owner = battle.fighter_for_side(owner_side)
-	if owner == null or owner.pos.distance_to(pos) > owner.radius + radius:
+	var candidates: Array = battle.active_fighters()
+	candidates.sort_custom(func(first, second) -> bool:
+		return first.fighter_uid < second.fighter_uid
+	)
+	for candidate in candidates:
+		if (
+			candidate.hp <= 0.0
+			or candidate.team_id != owner_side
+			or candidate.pos.distance_to(pos) > candidate.radius + radius
+		):
+			continue
+		var applied: float = battle.heal(candidate, _heal_amount)
+		if applied <= 0.0:
+			continue
+		removed = true
+		battle.record_stat("plant_sun_pickups_collected")
+		battle.spawn_ring(pos, ownership_visual_color(_color), radius, 62.0, 0.35)
+		battle.spawn_particles(pos, ownership_visual_color(_color), 11, 118.0)
+		battle.emit_combat_event("track", 0.5)
 		return
-	var applied: float = battle.heal(owner, _heal_amount)
-	if applied <= 0.0:
-		return
-	removed = true
-	battle.record_stat("plant_sun_pickups_collected")
-	battle.spawn_ring(pos, ownership_visual_color(_color), radius, 62.0, 0.35)
-	battle.spawn_particles(pos, ownership_visual_color(_color), 11, 118.0)
-	battle.emit_combat_event("track", 0.5)
 
 func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	var position := screen_position(context)

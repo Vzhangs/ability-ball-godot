@@ -6,12 +6,23 @@ var _port_angle := 0.0
 var _spawned_tanks: Array[WeakRef] = []
 var _deployment_animation_duration := 0.0
 var _deployment_animation_remaining := 0.0
+var _battle_context
+var _owner_side := -1
 
-func on_battle_started(_battle, fighter, _opponent, side: int) -> void:
+func on_battle_started(battle, fighter, _opponent, side: int) -> void:
+	_battle_context = battle
+	_owner_side = side
 	_port_angle = 0.0 if side == 0 else PI
 	_deployment_animation_duration = settingf("deployment_animation_duration")
 	_deployment_animation_remaining = 0.0
 	fighter.ability_timer = fighter.cooldown
+
+func automatic_activation_enabled() -> bool:
+	return (
+		_battle_context != null
+		and _owner_side >= 0
+		and _battle_context.count_entities(_owner_side, "heavy_tank") < settingi("max_tanks")
+	)
 
 func before_motion(_battle, _fighter, _opponent, side: int, delta: float) -> void:
 	var rotation_delta := delta
@@ -98,7 +109,6 @@ func activate(battle, fighter, _opponent, side: int) -> void:
 	battle.record_stat("heavy_tanks_deployed")
 	battle.spawn_ring(spawn_position, fighter.accent, tank_radius * 0.5, tank_radius * 2.4, 0.38)
 	battle.spawn_particles(spawn_position, fighter.accent, 9, 112.0)
-	battle.emit_combat_event("split", 0.6)
 
 func after_entities_step(battle, _fighter, _opponent, _side: int, _delta: float) -> void:
 	var tanks := _active_spawned_tanks()

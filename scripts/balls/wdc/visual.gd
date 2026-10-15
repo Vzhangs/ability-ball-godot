@@ -32,8 +32,7 @@ func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var active := ability != null and bool(ability.call("is_grid_active"))
 	if active:
 		canvas.draw_circle(position, radius * 1.12, Color(0.42, 0.9, 1.0, 0.2))
-	canvas.draw_circle(position, radius, fighter.color)
-	canvas.draw_circle(position, radius * 0.84, Color("151533"))
+	Surface.draw(canvas, position, radius, fighter.color, fighter.accent, Surface.Style.METAL, context["elapsed"])
 	canvas.draw_circle(position, radius, fighter.accent, false, 2.6)
 	var values: Array[int] = []
 	if active:

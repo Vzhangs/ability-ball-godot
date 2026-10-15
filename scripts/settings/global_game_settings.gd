@@ -5,6 +5,10 @@ const DEFAULT_BATTLE_TIME := 120.0
 const DEFAULT_ARENA_SIZE := Vector2(640.0, 640.0)
 const DEFAULT_RECORDING_FPS := 60
 const DEFAULT_RESULT_REVEAL_DELAY := 1.2
+const DEFAULT_RELAY_HANDOFF_PAUSE := 2.0
+const DEFAULT_RELAY_DEFEAT_TEXT_FONT_SIZE := 32
+const DEFAULT_DAMAGE_NUMBER_FONT_SIZE := 21
+const DEFAULT_DAMAGE_NUMBER_DURATION := 0.6
 
 const SETTING_SPECS := {
 	"battle_time_seconds": {
@@ -24,7 +28,7 @@ const SETTING_SPECS := {
 		"group": "可对战区域",
 		"default": DEFAULT_ARENA_SIZE.x,
 		"min": 320,
-		"max": 1920,
+		"max": 10000,
 		"step": 10,
 		"kind": "int",
 		"order": 20,
@@ -36,7 +40,7 @@ const SETTING_SPECS := {
 		"group": "可对战区域",
 		"default": DEFAULT_ARENA_SIZE.y,
 		"min": 320,
-		"max": 1920,
+		"max": 10000,
 		"step": 10,
 		"kind": "int",
 		"order": 30,
@@ -66,6 +70,54 @@ const SETTING_SPECS := {
 		"order": 50,
 		"suffix": " 秒",
 		"tooltip": "败方死亡特效和音效先完整呈现，随后再显示获胜弹窗。",
+	},
+	"relay_handoff_pause_seconds": {
+		"label": "擂台落败提示时间",
+		"group": "战斗表现",
+		"default": DEFAULT_RELAY_HANDOFF_PAUSE,
+		"min": 0.4,
+		"max": 8.0,
+		"step": 0.1,
+		"kind": "float",
+		"order": 55,
+		"suffix": " 秒",
+		"tooltip": "擂台赛中每个球落败后冻结战斗并让居中落败文字渐隐的时间；最终一球落败后也至少停留这么久再揭晓胜负。",
+	},
+	"relay_defeat_text_font_size": {
+		"label": "擂台落败提示字号",
+		"group": "战斗表现",
+		"default": DEFAULT_RELAY_DEFEAT_TEXT_FONT_SIZE,
+		"min": 16,
+		"max": 72,
+		"step": 1,
+		"kind": "int",
+		"order": 56,
+		"suffix": " px",
+		"tooltip": "擂台赛场内居中落败悬浮文字的基础字号。",
+	},
+	"damage_number_font_size": {
+		"label": "伤害数字字号",
+		"group": "战斗表现",
+		"default": DEFAULT_DAMAGE_NUMBER_FONT_SIZE,
+		"min": 8,
+		"max": 96,
+		"step": 1,
+		"kind": "int",
+		"order": 60,
+		"suffix": " px",
+		"tooltip": "所有球和附属物造成伤害时，场内浮动伤害数字的字号。",
+	},
+	"damage_number_duration_seconds": {
+		"label": "伤害数字停留时间",
+		"group": "战斗表现",
+		"default": DEFAULT_DAMAGE_NUMBER_DURATION,
+		"min": 0.1,
+		"max": 10.0,
+		"step": 0.1,
+		"kind": "float",
+		"order": 70,
+		"suffix": " 秒",
+		"tooltip": "所有球和附属物造成伤害时，伤害数字从出现到完全消失的总时长。",
 	},
 }
 
@@ -120,4 +172,6 @@ func _normalize_value(spec: Dictionary, raw_value):
 		numeric = float(raw_value)
 	numeric = clampf(numeric, float(spec["min"]), float(spec["max"]))
 	numeric = snappedf(numeric, float(spec["step"]))
-	return int(round(numeric)) if String(spec["kind"]) == "int" else numeric
+	if String(spec["kind"]) == "int":
+		return int(round(numeric))
+	return numeric

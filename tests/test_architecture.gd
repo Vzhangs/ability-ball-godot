@@ -15,14 +15,23 @@ const CORE_FILES := [
 	"res://scripts/balls/core/invulnerability_status_effect.gd",
 	"res://scripts/balls/core/fighter_death_effect_entity.gd",
 	"res://scripts/balls/core/ball_visual.gd",
+	"res://scripts/balls/core/ball_surface.gd",
+	"res://scripts/balls/core/combat_glow.gd",
 	"res://scripts/balls/core/projectile_entity.gd",
 	"res://scripts/logging/battle_logger.gd",
+	"res://scripts/logging/combat_ledger.gd",
+	"res://scripts/ui/battle_result_panel.gd",
 	"res://scripts/settings/ball_settings_store.gd",
 	"res://scripts/settings/global_game_settings.gd",
 	"res://scripts/settings/global_settings_store.gd",
 	"res://scripts/ui/ball_settings_dialog.gd",
 	"res://scripts/ui/battle_view.gd",
+	"res://scripts/ui/arena_presentation.gd",
+	"res://scripts/ui/particle_presentation.gd",
+	"res://scripts/ui/hud_presentation.gd",
+	"res://scripts/ui/hud_glass_layer.gd",
 	"res://scripts/ui/global_settings_dialog.gd",
+	"res://scripts/ui/mode_roster_editor.gd",
 ]
 
 const FORBIDDEN_SHARED_STATE := [
@@ -51,6 +60,7 @@ func _init() -> void:
 	_check_public_view_only_draws_generic_contracts()
 	_check_single_engine_entrypoint()
 	_check_floating_text_policy()
+	_check_font_contract()
 	if failures.is_empty():
 		print("ABILITY_BALL_ARCHITECTURE_TESTS_OK")
 		quit(0)
@@ -70,20 +80,25 @@ func _check_core_has_no_ball_knowledge() -> void:
 
 func _check_per_ball_tuning_contract() -> void:
 	var ball_ids := BallRegistry.ids()
+	var default_hp_by_id := {}
 	for ball_id in ball_ids:
 		var module: BallModule = BallRegistry.get_module(ball_id)
 		var specs := module.setting_specs()
 		var defaults := module.default_settings_snapshot()
-		_check(is_equal_approx(float(defaults.get("max_hp", 0.0)), 100.0), "%s 本体默认生命值为 100" % ball_id)
+		default_hp_by_id[ball_id] = float(defaults.get("max_hp", 0.0))
+		_check(float(default_hp_by_id[ball_id]) > 0.0, "%s 本体默认生命值为正数" % ball_id)
 		_check(specs.keys().size() == defaults.keys().size(), "%s 的参数 Schema 与默认值一一对应" % ball_id)
 		for key in specs:
 			var spec: Dictionary = specs[key]
 			_check(spec.has("label") and spec.has("default"), "%s/%s 声明标签与默认值" % [ball_id, key])
-			_check(float(spec["max"]) >= float(spec["min"]), "%s/%s 参数范围有效" % [ball_id, key])
+			if String(spec.get("kind", "float")) == "text":
+				_check(int(spec.get("max_length", 0)) > 0, "%s/%s 文本长度范围有效" % [ball_id, key])
+			else:
+				_check(float(spec["max"]) >= float(spec["min"]), "%s/%s 参数范围有效" % [ball_id, key])
 	var target_id: String = ball_ids[0]
 	BallRegistry.configure_settings({target_id: {"max_hp": 137.0}})
 	for ball_id in ball_ids:
-		var expected_hp := 137.0 if ball_id == target_id else 100.0
+		var expected_hp := 137.0 if ball_id == target_id else float(default_hp_by_id[ball_id])
 		_check(
 			is_equal_approx(BallRegistry.get_module(ball_id).max_hp, expected_hp),
 			"修改一个球的持久化参数不会改写其他球：%s" % ball_id
@@ -96,13 +111,20 @@ func _check_global_settings_contract() -> void:
 	_check(settings.arena_size() == Vector2(640.0, 640.0), "全局默认竞技场为 640×640")
 	_check(settings.settingi("recording_fps") == 60, "全局默认录制帧率为 60 FPS")
 	_check(is_equal_approx(settings.settingf("result_reveal_delay_seconds"), 1.2), "全局默认延迟 1.2 秒揭晓胜负")
+	_check(is_equal_approx(settings.settingf("relay_handoff_pause_seconds"), 2.0), "全局默认擂台落败停顿为 2 秒")
+	_check(settings.settingi("relay_defeat_text_font_size") == 32, "全局默认擂台落败提示字号为 32 px")
+	_check(settings.settingi("damage_number_font_size") == 21, "全局默认伤害数字字号为 21 px")
+	_check(is_equal_approx(settings.settingf("damage_number_duration_seconds"), 0.6), "全局默认伤害数字停留 0.6 秒")
 	var specs: Dictionary = settings.setting_specs()
-	_check(specs.size() == 5, "全局 Schema 包含时限、竞技场宽高、录制帧率与胜负揭晓延迟")
+	_check(specs.size() == 9, "全局 Schema 包含当前玩法共用的九项参数")
 	_check(not specs.has("max_hp") and not specs.has("damage"), "全局设置不接管任何球属性")
 	var simulation_source := FileAccess.get_file_as_string("res://scripts/simulation/battle_simulation.gd")
 	_check(simulation_source.contains("time_limit_seconds"), "模拟器显式接收全局默认对局时限")
 	var main_source := FileAccess.get_file_as_string("res://scripts/main.gd")
-	_check(main_source.contains("GlobalSettingsStoreScript.load_settings"), "入口启动时加载全局持久化设置")
+	_check(main_source.contains("GlobalSettingsStoreScript.load_mode_settings(battle_mode)"), "入口按当前玩法加载独立的持久化全局设置")
+	_check(main_source.contains("GlobalSettingsStoreScript.save_mode_settings(battle_mode"), "入口只保存当前玩法的全局设置档案")
+	var store_source := FileAccess.get_file_as_string("res://scripts/settings/global_settings_store.gd")
+	_check(store_source.contains('"mode_settings"'), "全局设置文件按玩法 ID 隔离配置字典")
 	_check(not main_source.contains("time_limit_spin_box"), "入口不保留第二套单局时限输入")
 
 func _check_ball_modules_do_not_reference_each_other() -> void:
@@ -171,7 +193,11 @@ func _check_public_view_only_draws_generic_contracts() -> void:
 	for feature_renderer in ["_draw_fire_zones", "_draw_gravity_wells", "_draw_anchors", "_draw_projectiles"]:
 		_check(not source.contains(feature_renderer), "公共视图不得包含球种实体绘制器：%s" % feature_renderer)
 	_check(source.contains("entity.draw(self, context)"), "公共视图通过 BallEntity 契约绘制附属物")
-	_check(source.contains("entity.draw_hud(self, hud_bounds[entity.owner_side])"), "公共视图通过 BallEntity 契约绘制实体 HUD")
+	_check(
+		source.contains("entity.draw_hud(self, fighter_bounds[entity.owner_fighter_uid])")
+		and source.contains("entity.draw_hud(self, team_bounds[entity.owner_side])"),
+		"公共视图通过 BallEntity 契约绘制实体 HUD，并按创建主球优先、阵营兜底路由"
+	)
 	_check(source.contains("effect.draw_overlay(self, fighter, context)"), "公共视图通过 BallStatusEffect 契约绘制状态")
 	_check(source.contains("effect.draw_topmost_overlay(self, fighter, context)"), "公共视图通过状态契约统一绘制最上层标识")
 
@@ -196,6 +222,26 @@ func _check_floating_text_policy() -> void:
 			_check(not source.contains("spawn_text("), "球模块不得生成说明性浮字，应改用数值、符号或特效：%s" % file_path)
 	var simulation_source := FileAccess.get_file_as_string("res://scripts/simulation/battle_simulation.gd")
 	_check(simulation_source.count("spawn_text(") == 4, "战斗核心只保留本体伤害、实体伤害、治疗和通用浮字入口")
+
+func _check_font_contract() -> void:
+	var main_source := FileAccess.get_file_as_string("res://scripts/main.gd")
+	_check(
+		main_source.contains("_install_ui_font()")
+			and main_source.contains("CjkFontProviderScript.font()"),
+		"主界面必须安装统一中文 UI 字体"
+	)
+	for file_path in _gd_files_recursive("res://scripts"):
+		var source := FileAccess.get_file_as_string(file_path)
+		_check(
+			not source.contains("ThemeDB.fallback_font"),
+			"脚本不得重新使用可能缺少中文字符的 Godot 默认字体：%s" % file_path
+		)
+		if source.contains("draw_string("):
+			_check(
+				source.contains("CjkFontProviderScript.font()")
+					or source.contains("_font = CjkFontProviderScript.font()"),
+				"手绘文字必须使用统一中文字体：%s" % file_path
+			)
 
 func _check(condition: bool, label: String) -> void:
 	if not condition:

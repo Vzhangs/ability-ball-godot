@@ -16,8 +16,7 @@ func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var radius: float = context["radius"]
 	var rotation: float = fighter.rotation * 0.22
 	canvas.draw_circle(position, radius * 1.08, Color(0.62, 0.86, 0.93, 0.11))
-	canvas.draw_circle(position, radius, fighter.color)
-	canvas.draw_circle(position, radius * 0.88, Color("322449"))
+	Surface.draw(canvas, position, radius, fighter.color, fighter.accent, Surface.Style.SOLID, context["elapsed"])
 	_draw_web(canvas, position, radius, rotation, fighter.accent)
 	_draw_spider(canvas, position + Vector2(radius * 0.28, radius * 0.3), radius, rotation)
 	canvas.draw_circle(position, radius, fighter.accent, false, maxf(2.0, radius * 0.085), true)

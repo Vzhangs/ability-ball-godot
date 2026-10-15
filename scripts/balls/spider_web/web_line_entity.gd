@@ -57,8 +57,8 @@ func process_step(battle, delta: float) -> void:
 func step(battle, delta: float) -> void:
 	_age += delta
 	_trigger_flash = maxf(0.0, _trigger_flash - delta * 3.6)
-	var owner = battle.fighter_for_side(owner_side)
-	var opponent = battle.opponent_for_side(owner_side)
+	var owner = battle.owner_for_entity(self)
+	var opponent = battle.opponent_for_entity(self)
 	if owner == null or opponent == null or owner.hp <= 0.0 or opponent.hp <= 0.0:
 		return
 	_current_strand_end = owner.pos
@@ -84,7 +84,7 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	if is_captured():
 		_draw_captured_strand(canvas, context)
 		return
-	var owner = context.fighter_for_side(owner_side)
+	var owner = context.owner_for_entity(self)
 	if owner == null:
 		return
 	var start := context.point(_anchor)
@@ -122,7 +122,7 @@ func anchor_position() -> Vector2:
 func strand_end(battle) -> Vector2:
 	if is_captured():
 		return pos
-	var owner = battle.fighter_for_side(owner_side)
+	var owner = battle.owner_for_entity(self)
 	return owner.pos if owner != null else _anchor
 
 func capture_fold_progress() -> float:

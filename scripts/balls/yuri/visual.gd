@@ -24,7 +24,59 @@ func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var radius: float = context["radius"]
 	var elapsed: float = context["elapsed"]
 	canvas.draw_circle(position, radius * 1.08, Color(0.94, 0.36, 1.0, 0.18))
-	canvas.draw_circle(position, radius, fighter.color)
-	canvas.draw_circle(position, radius * 0.82, Color("24102f"))
+	Surface.draw(canvas, position, radius, fighter.color, fighter.accent, Surface.Style.ORBIT, context["elapsed"])
 	canvas.draw_circle(position, radius, fighter.accent, false, 2.5)
 	EyeRenderer.draw_eye(canvas, position, radius, elapsed)
+	if ability != null:
+		_draw_overload_feedback(
+			canvas,
+			position,
+			radius,
+			elapsed,
+			float(ability.call("overload_flash_ratio")),
+			int(ability.call("overload_excess_count"))
+		)
+
+func _draw_overload_feedback(
+	canvas: CanvasItem,
+	position: Vector2,
+	radius: float,
+	elapsed: float,
+	flash_ratio: float,
+	excess_count: int
+) -> void:
+	if flash_ratio <= 0.0 or excess_count <= 0:
+		return
+	var intensity := clampf(0.7 + float(excess_count) * 0.08, 0.7, 1.0) * flash_ratio
+	var arc_color := Color(1.0, 0.25, 0.9, 0.72 * intensity)
+	var core_color := Color(1.0, 0.88, 1.0, 0.9 * intensity)
+	var bolt_count := mini(6, 2 + excess_count)
+	for bolt_index in range(bolt_count):
+		var base_angle := -PI * 0.86 + PI * 1.72 * float(bolt_index) / float(maxi(1, bolt_count - 1))
+		var points := PackedVector2Array()
+		for segment_index in range(6):
+			var progress := float(segment_index) / 5.0
+			var jitter := sin(
+				elapsed * 31.0
+					+ float(bolt_index) * 2.17
+					+ float(segment_index) * 3.41
+			) * radius * 0.11 * sin(progress * PI)
+			var direction := Vector2.from_angle(base_angle)
+			var normal := direction.orthogonal()
+			points.append(
+				position
+					+ direction * lerpf(radius * 0.34, radius * 1.34, progress)
+					+ normal * jitter
+			)
+		canvas.draw_polyline(points, arc_color, 3.2, true)
+		canvas.draw_polyline(points, core_color, 1.1, true)
+	canvas.draw_arc(
+		position,
+		radius * (1.08 + 0.04 * sin(elapsed * 24.0)),
+		-PI * 0.9,
+		-PI * 0.1,
+		20,
+		Color(0.92, 0.34, 1.0, 0.34 * intensity),
+		2.0,
+		true
+	)

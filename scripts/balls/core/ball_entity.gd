@@ -10,6 +10,10 @@ var owner_side := -1
 ## Runtime creator identity. `owner_side` remains the stable team allegiance;
 ## this UID distinguishes multiple main fighters that share that allegiance.
 var owner_fighter_uid := -1
+var combat_origin_fighter_uid := -1
+## Projectiles inherit a value snapshot of the producing unit at launch.
+var combat_source: Dictionary = {}
+var combat_contact_source: Dictionary = {}
 var pos := Vector2.ZERO
 var velocity := Vector2.ZERO
 var radius := 0.0
@@ -17,8 +21,25 @@ var remaining := -1.0
 var removed := false
 var tags := PackedStringArray()
 var draw_layer := 0
+var status_effects: Array[BallStatusEffect] = []
 var _capture_disabled := false
 var _ownership_color_override := Color(0.0, 0.0, 0.0, 0.0)
+
+## Independent units override this with a stable category ID and public name.
+## Empty categories are attack carriers and inherit their producer's statistics.
+func combat_category() -> Dictionary:
+	return {}
+
+func combat_identity() -> Dictionary:
+	var category := combat_category()
+	if category.is_empty() and not combat_source.is_empty():
+		return combat_source.duplicate(true)
+	return {
+		"fighter_uid": owner_fighter_uid, "team_id": owner_side,
+		"category_id": String(category.get("id", "body")),
+		"category_name": String(category.get("name", "本体与技能")),
+		"origin_fighter_uid": combat_origin_fighter_uid if combat_origin_fighter_uid >= 0 else owner_fighter_uid,
+	}
 
 func process_lifetime(delta: float) -> void:
 	if _capture_disabled:
@@ -28,7 +49,19 @@ func process_lifetime(delta: float) -> void:
 func process_step(battle, delta: float) -> void:
 	if _capture_disabled:
 		return
-	step(battle, delta)
+	step(battle, delta * status_step_multiplier())
+
+func status_step_multiplier() -> float:
+	var slow := 1.0
+	var haste := 1.0
+	for effect: BallStatusEffect in status_effects:
+		if not effect.is_expired():
+			var value := maxf(0.0, effect.entity_step_multiplier())
+			if value < 1.0:
+				slow = minf(slow, value)
+			else:
+				haste = maxf(haste, value)
+	return slow * haste
 
 func tick_lifetime(delta: float) -> void:
 	if remaining < 0.0:
@@ -46,6 +79,15 @@ func draw(_canvas: CanvasItem, _context: BallRenderContext) -> void:
 func draw_hud(_canvas: CanvasItem, _health_bar_bounds: Rect2) -> void:
 	pass
 
+## Independently visible allied units opt in to the generic non-duel team marker.
+## Projectiles, areas, trails, pickups, and short-lived VFX keep the default zero height.
+func team_marker_world_height() -> float:
+	return 0.0
+
+## Separate anchor hook keeps the public view independent of entity-specific visual geometry.
+func team_marker_world_position() -> Vector2:
+	return pos
+
 ## Non-positive layers render below both fighter bodies; positive layers render above them.
 func draws_above_balls() -> bool:
 	return draw_layer >= ABOVE_BALL_DRAW_LAYER
@@ -55,6 +97,11 @@ func has_tag(tag: String) -> bool:
 
 func is_hostile_to(side: int) -> bool:
 	return owner_side >= 0 and owner_side != side
+
+## Terrain durability is distinct from a combat unit's life. This semantic flag
+## does not change collision, attack reception, capture, or ownership capabilities.
+func is_terrain() -> bool:
+	return false
 
 ## Opt-in combat contract for summons and other world entities.
 ## Attacks query this capability by geometry; they never need the concrete entity type.

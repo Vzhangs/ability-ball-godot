@@ -1,0 +1,147 @@
+{
+  "version": "1.21.1",
+  "version_url": "https://piston-meta.mojang.com/v1/packages/81396eb81dcfec06cf6fa1c6fa06e4ab0c15eb81/1.21.1.json",
+  "asset_index": {
+    "id": "17",
+    "sha1": "76d7a97b9e0778fda3b14e474f012450ca0de1bb",
+    "size": 449557,
+    "totalSize": 824921227,
+    "url": "https://piston-meta.mojang.com/v1/packages/76d7a97b9e0778fda3b14e474f012450ca0de1bb/17.json"
+  },
+  "processing": "none; original bytes",
+  "assets": [
+    {
+      "file": "wood_place.ogg",
+      "asset": "minecraft/sounds/dig/wood1.ogg",
+      "url": "https://resources.download.minecraft.net/9b/9bc2a84d0aa98113fc52609976fae8fc88ea6333",
+      "sha1": "9bc2a84d0aa98113fc52609976fae8fc88ea6333",
+      "sha256": "cb6071c83a7f19ee555e9d661dc9e564c77ad9fcf2d1a6848aab21bc3b1c0289"
+    },
+    {
+      "file": "wood_break.ogg",
+      "asset": "minecraft/sounds/dig/wood3.ogg",
+      "url": "https://resources.download.minecraft.net/45/45b2aef7b5049e81b39b58f8d631563fadcc778b",
+      "sha1": "45b2aef7b5049e81b39b58f8d631563fadcc778b",
+      "sha256": "cf6be2314c08ea3fd311bdaebe14d0c73ca189bbbda09f96d26a3dea7e711cf6"
+    },
+    {
+      "file": "wood_hit.ogg",
+      "asset": "minecraft/sounds/step/wood2.ogg",
+      "url": "https://resources.download.minecraft.net/de/de199b6c6f0f5ce2f653273d43f57979ee31c395",
+      "sha1": "de199b6c6f0f5ce2f653273d43f57979ee31c395",
+      "sha256": "5da109e455b3be43651167942c4d46a779e17a0500051f945b1daf8d1121380e"
+    },
+    {
+      "file": "stone_place.ogg",
+      "asset": "minecraft/sounds/dig/stone1.ogg",
+      "url": "https://resources.download.minecraft.net/4e/4e094ed8dfa98656d8fec52a7d20c5ee6098b6ad",
+      "sha1": "4e094ed8dfa98656d8fec52a7d20c5ee6098b6ad",
+      "sha256": "97f2a8a73b6f577b85c1a162c31810c7aff1ad1f34564dfdacebb64b26d1c7c6"
+    },
+    {
+      "file": "stone_break.ogg",
+      "asset": "minecraft/sounds/dig/stone3.ogg",
+      "url": "https://resources.download.minecraft.net/8f/8f23c02475d388b23e5faa680eafe6b991d7a9d4",
+      "sha1": "8f23c02475d388b23e5faa680eafe6b991d7a9d4",
+      "sha256": "19273f0e7e25b459ea29511dcbc4f7f209c04cea2fd1c34a16250737469ca51c"
+    },
+    {
+      "file": "stone_hit.ogg",
+      "asset": "minecraft/sounds/step/stone2.ogg",
+      "url": "https://resources.download.minecraft.net/22/22a383d9c22342305a4f16fec0bb479a885f8da2",
+      "sha1": "22a383d9c22342305a4f16fec0bb479a885f8da2",
+      "sha256": "2cfbf878743612960d8d7eecacc1644b1558a547d8533e22ed7ebd2c9a9625c7"
+    },
+    {
+      "file": "netherite_place.ogg",
+      "asset": "minecraft/sounds/block/netherite/break1.ogg",
+      "url": "https://resources.download.minecraft.net/d1/d10147b5114fb55a1d3a2705cef3022ea59e0cc3",
+      "sha1": "d10147b5114fb55a1d3a2705cef3022ea59e0cc3",
+      "sha256": "23967c46d0a69425d619ee59c5df3a57062ea2fc3c6903556ded4211770d4e99"
+    },
+    {
+      "file": "netherite_break.ogg",
+      "asset": "minecraft/sounds/block/netherite/break3.ogg",
+      "url": "https://resources.download.minecraft.net/54/546fddb67d3e27c613d236d210baef4224c3dbc5",
+      "sha1": "546fddb67d3e27c613d236d210baef4224c3dbc5",
+      "sha256": "9939389441e380d4c00c02bac48426583b8dfee1e2ae5403ede114f43fb855dd"
+    },
+    {
+      "file": "netherite_hit.ogg",
+      "asset": "minecraft/sounds/block/netherite/step2.ogg",
+      "url": "https://resources.download.minecraft.net/43/43e15f44cf8c5e02591246685e968e0612aa1dd4",
+      "sha1": "43e15f44cf8c5e02591246685e968e0612aa1dd4",
+      "sha256": "1b6b0036acd08e59d9bbb7522f1db7605c6ff5a43c4d0e48c5401e7e7828794f"
+    },
+    {
+      "file": "pickup.ogg",
+      "asset": "minecraft/sounds/random/pop.ogg",
+      "url": "https://resources.download.minecraft.net/8f/8f45b5faf6dfae2065846d26612f7552b73640dd",
+      "sha1": "8f45b5faf6dfae2065846d26612f7552b73640dd",
+      "sha256": "5e3baf518a0104760dc06a2e0088b377433997b46511c1730db0e3ba6f2b0ca7"
+    },
+    {
+      "file": "upgrade.ogg",
+      "asset": "minecraft/sounds/random/orb.ogg",
+      "url": "https://resources.download.minecraft.net/e9/e9833a1512b57bcf88ac4fdcc8df4e5a7e9d701d",
+      "sha1": "e9833a1512b57bcf88ac4fdcc8df4e5a7e9d701d",
+      "sha256": "5998bf8ee2eecc2779ef896f04a540f9d48d4e96cc9227aae4646f4d9b817749"
+    },
+    {
+      "file": "sword_light.ogg",
+      "asset": "minecraft/sounds/entity/player/attack/weak1.ogg",
+      "url": "https://resources.download.minecraft.net/f2/f26ab58dc70ce7a3f4d16b5bb31620894b0b8812",
+      "sha1": "f26ab58dc70ce7a3f4d16b5bb31620894b0b8812",
+      "sha256": "efbcbfa5d3956a3a987de893c5b4c256a72e1fe46b121ba7babdafd0212a6cdd"
+    },
+    {
+      "file": "sword_heavy.ogg",
+      "asset": "minecraft/sounds/entity/player/attack/strong1.ogg",
+      "url": "https://resources.download.minecraft.net/d7/d7067e204913cf9631bfbb7340102f6de75c2dfc",
+      "sha1": "d7067e204913cf9631bfbb7340102f6de75c2dfc",
+      "sha256": "4b5d655f7b74aec8c701acd02e9f65bba47f06246d6c0a2fe31c12915296b840"
+    },
+    {
+      "file": "armor_wood.ogg",
+      "asset": "minecraft/sounds/item/armor/equip_leather1.ogg",
+      "url": "https://resources.download.minecraft.net/eb/ebe259bc9b07c4ae6a08471e86dc0e6d8d4d04c2",
+      "sha1": "ebe259bc9b07c4ae6a08471e86dc0e6d8d4d04c2",
+      "sha256": "68c95799bcba7b6a7d35f387c10a4821ce42ee3f048c365e0e7536760367ebca"
+    },
+    {
+      "file": "armor_stone.ogg",
+      "asset": "minecraft/sounds/item/armor/equip_generic1.ogg",
+      "url": "https://resources.download.minecraft.net/19/19e3ddd127884efbbece9806ef8fce3498e03da3",
+      "sha1": "19e3ddd127884efbbece9806ef8fce3498e03da3",
+      "sha256": "b37a9bdf7794e60746f889fae60f079b626f4cf2959f8c7322c76578d8a50fc9"
+    },
+    {
+      "file": "armor_iron.ogg",
+      "asset": "minecraft/sounds/item/armor/equip_iron1.ogg",
+      "url": "https://resources.download.minecraft.net/fc/fcb8cef95d170fa97e14a35c625976511d53b1fd",
+      "sha1": "fcb8cef95d170fa97e14a35c625976511d53b1fd",
+      "sha256": "0cc22f07f8d4e3a30d4eae33b9e97e076049760a6c32ab0983a440b6f1ba25a6"
+    },
+    {
+      "file": "armor_gold.ogg",
+      "asset": "minecraft/sounds/item/armor/equip_gold1.ogg",
+      "url": "https://resources.download.minecraft.net/7a/7a122f23df31c32c5c2d14e06548a56546b5ea6c",
+      "sha1": "7a122f23df31c32c5c2d14e06548a56546b5ea6c",
+      "sha256": "79ddf129885cc57337c8ce46c386996ce6dc47818e69ae038d402d50fe93835b"
+    },
+    {
+      "file": "armor_diamond.ogg",
+      "asset": "minecraft/sounds/item/armor/equip_diamond1.ogg",
+      "url": "https://resources.download.minecraft.net/54/548b24e7e67c0f0fd9d995a9539559e13ab18930",
+      "sha1": "548b24e7e67c0f0fd9d995a9539559e13ab18930",
+      "sha256": "0fc715db70eb8281ee963b3853e52c075e7d2da58110c55ede0d35793aea3ed9"
+    },
+    {
+      "file": "armor_netherite.ogg",
+      "asset": "minecraft/sounds/item/armor/equip_netherite1.ogg",
+      "url": "https://resources.download.minecraft.net/d1/d1c98c672f1a4039accf2f396ebc78fd0403e1e9",
+      "sha1": "d1c98c672f1a4039accf2f396ebc78fd0403e1e9",
+      "sha256": "e4bc9a1a271e19ad7818e9b29bbfb332dd2dd0ca0fe3460a8ee75cfd57e129d5"
+    }
+  ]
+}

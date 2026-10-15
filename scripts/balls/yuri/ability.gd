@@ -6,9 +6,16 @@ const PsychicEyeOverlayEntity := preload("res://scripts/balls/yuri/psychic_eye_o
 
 var _owner_side := -1
 var _controlled_entities: Array[WeakRef] = []
+var _overload_tick_timer := 0.0
+var _overload_flash_remaining := 0.0
+var _current_overload_excess := 0
 
 func on_battle_started(_battle, _fighter, _opponent, side: int) -> void:
 	_owner_side = side
+	_controlled_entities.clear()
+	_overload_tick_timer = settingf("control_overload_tick_interval")
+	_overload_flash_remaining = 0.0
+	_current_overload_excess = 0
 
 func controlled_count() -> int:
 	var count := 0
@@ -18,6 +25,32 @@ func controlled_count() -> int:
 			count += 1
 	return count
 
+func overload_excess_count() -> int:
+	return _current_overload_excess
+
+func overload_flash_ratio() -> float:
+	return clampf(
+		_overload_flash_remaining / maxf(0.001, settingf("control_overload_effect_duration")),
+		0.0,
+		1.0
+	)
+
+func on_step(battle, fighter, _opponent, side: int, delta: float) -> void:
+	_owner_side = side
+	_overload_flash_remaining = maxf(0.0, _overload_flash_remaining - delta)
+	_prune_destroyed_or_reowned_entities(side)
+	var hard_limit := settingi("max_controlled_total")
+	var soft_limit := mini(settingi("soft_controlled_total"), hard_limit)
+	_current_overload_excess = maxi(0, _controlled_entities.size() - soft_limit)
+	var tick_interval := settingf("control_overload_tick_interval")
+	if _current_overload_excess <= 0:
+		_overload_tick_timer = tick_interval
+		return
+	_overload_tick_timer -= delta
+	while _overload_tick_timer <= 0.000001 and fighter.hp > 0.0:
+		_overload_tick_timer += tick_interval
+		_apply_control_overload_tick(battle, fighter)
+
 func activate(battle, fighter, _opponent, side: int) -> void:
 	_owner_side = side
 	_prune_destroyed_or_reowned_entities(side)
@@ -26,7 +59,7 @@ func activate(battle, fighter, _opponent, side: int) -> void:
 	var targets := _nearest_control_targets(battle, fighter, side, control_limit)
 	var controlled := 0
 	for target: BallEntity in targets:
-		var previous_side := target.owner_side
+		var former_owner = battle.owner_for_entity(target)
 		if not target.transfer_ownership(side, fighter):
 			continue
 		target.set_ownership_visual_color(fighter.accent)
@@ -41,7 +74,6 @@ func activate(battle, fighter, _opponent, side: int) -> void:
 			fighter.accent,
 			controlled_color
 		))
-		var former_owner = battle.fighter_for_side(previous_side)
 		if former_owner != null:
 			battle.damage(
 				former_owner,
@@ -53,6 +85,13 @@ func activate(battle, fighter, _opponent, side: int) -> void:
 		battle.spawn_particles(target.pos, controlled_color, 7, 105.0)
 		battle.record_stat("mind_controls")
 		controlled += 1
+	_current_overload_excess = maxi(
+		0,
+		_controlled_entities.size() - mini(
+			settingi("soft_controlled_total"),
+			settingi("max_controlled_total")
+		)
+	)
 	if controlled <= 0:
 		return
 	var pulse_duration := settingf("pulse_duration")
@@ -74,6 +113,25 @@ func activate(battle, fighter, _opponent, side: int) -> void:
 
 func contact_damage(_battle, _fighter, _opponent) -> float:
 	return 0.0
+
+func _apply_control_overload_tick(battle, fighter) -> void:
+	var tick_interval := settingf("control_overload_tick_interval")
+	var damage := float(_current_overload_excess) \
+		* settingf("control_overload_damage_per_excess_per_second") \
+		* tick_interval
+	var applied: float = battle.damage(fighter, damage, Color("ff78ea"), null)
+	if applied <= 0.0:
+		return
+	_overload_flash_remaining = settingf("control_overload_effect_duration")
+	var particle_count := 4 + mini(_current_overload_excess, 5)
+	battle.spawn_particles(
+		fighter.pos,
+		Color("ff78ea"),
+		particle_count,
+		72.0 + float(_current_overload_excess) * 9.0
+	)
+	battle.record_stat("mind_control_overload_ticks")
+	battle.record_stat("mind_control_overload_excess", _current_overload_excess)
 
 func _nearest_control_targets(battle, fighter, side: int, limit: int) -> Array[BallEntity]:
 	var result: Array[BallEntity] = []

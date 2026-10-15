@@ -59,10 +59,19 @@ func tick(battle, target, delta: float) -> void:
 		var source = battle.fighter_for_uid(source_fighter_uid)
 		if source == null:
 			source = battle.fighter_for_side(source_side)
-		var applied: float = battle.damage(target, _damage_per_tick, _effect_color, source)
+		var applied: float
+		if target is BallEntity:
+			applied = battle.damage_entity(
+				target as BallEntity,
+				_damage_per_tick,
+				_effect_color,
+				source_side
+			)
+		else:
+			applied = battle.damage(target, _damage_per_tick, _effect_color, source)
 		if applied > 0.0:
 			battle.record_stat("burn_damage_ticks")
-		if applied <= 0.0 and target.hp <= 0.0:
+		if applied <= 0.0 and float(target.get("hp")) <= 0.0:
 			break
 
 func refresh_from(other: BallStatusEffect) -> void:

@@ -40,6 +40,11 @@ func _init(config: Dictionary = {}, behavior: Script = null, visual: Script = nu
 	if configured_audio_samples is Dictionary:
 		for event_kind in configured_audio_samples:
 			_audio_samples[String(event_kind)] = configured_audio_samples[event_kind]
+	_register_setting("ability_description", {
+		"label": "球简介", "group": "公开信息", "default": ability_description,
+		"kind": "text", "multiline": true, "max_length": 4000, "order": 0,
+		"tooltip": "面向观众说明能力规则、有效目标、结果和限制；不要写具体数值、配置原理或画面与声音表现。",
+	})
 	_register_setting("max_hp", {
 		"label": "生命值", "group": "基础属性", "default": max_hp,
 		"min": 1.0, "max": 10000.0, "step": 1.0, "kind": "float", "order": 10,
@@ -96,6 +101,12 @@ func apply_settings(overrides: Dictionary) -> void:
 	speed = settingf("speed")
 	radius = settingf("radius")
 	cooldown = settingf("cooldown")
+	ability_description = sanitize_ability_text(String(setting("ability_description")))
+	if not ability_text_is_public_safe(ability_description):
+		ability_description = sanitize_ability_text(
+			String(_setting_specs["ability_description"]["default"])
+		).strip_edges()
+	_setting_values["ability_description"] = ability_description
 
 func setting(key: String):
 	assert(_setting_values.has(key), "%s has no setting %s" % [id, key])
@@ -130,6 +141,100 @@ func default_settings_snapshot() -> Dictionary:
 		result[key] = _setting_specs[key]["default"]
 	return result
 
+func formatted_ability_description() -> String:
+	var source := sanitize_ability_text(ability_description).strip_edges()
+	if source.is_empty():
+		return source
+	if source.contains("\n"):
+		return source
+	var summary := ""
+	var details: Array[String] = []
+	for raw_sentence in source.split("。", false):
+		for raw_clause in String(raw_sentence).split("；", false):
+			var clause := String(raw_clause).strip_edges()
+			if clause.is_empty():
+				continue
+			if summary.is_empty():
+				summary = _complete_description_item(clause)
+			else:
+				details.append(_complete_description_item(clause))
+	if summary.is_empty() or details.is_empty():
+		return source
+	var detail_lines := PackedStringArray()
+	for detail in details:
+		detail_lines.append("• %s" % detail)
+	return "%s\n\n%s" % [summary, "\n".join(detail_lines)]
+
+static func ability_text_looks_corrupted(text: String) -> bool:
+	if sanitize_ability_text(text) != text:
+		return true
+	for marker in [String.chr(0xfffd), "Ã", "Â", "â€", "ðŸ", "ã€", "ï¼"]:
+		if text.contains(marker):
+			return true
+	var latin_lead_count := 0
+	for index in range(text.length()):
+		var codepoint := text.unicode_at(index)
+		if codepoint >= 0x80 and codepoint <= 0x9f:
+			return true
+		if codepoint in [0x00e5, 0x00e6, 0x00e7, 0x00e8, 0x00e9]:
+			latin_lead_count += 1
+	return latin_lead_count >= 2
+
+static func ability_text_contains_tuning_details(text: String) -> bool:
+	for index in range(text.length()):
+		var codepoint := text.unicode_at(index)
+		if codepoint >= 0x30 and codepoint <= 0x39:
+			return true
+	var chinese_value_pattern := RegEx.new()
+	chinese_value_pattern.compile("[零一二三四五六七八九十百千万两半]+(秒|毫秒|点伤害|点生命|像素|度|倍|％|%)")
+	if chinese_value_pattern.search(text) != null:
+		return true
+	for marker in [
+		"冷却时间为", "伤害为", "速度为", "范围为", "概率为", "权重为",
+		"倍率为", "生命为", "数量为", "半径为", "持续时间为", "间隔为",
+	]:
+		if text.contains(marker):
+			return true
+	return false
+
+static func ability_text_contains_presentation_details(text: String) -> bool:
+	for marker in [
+		"特效", "画面", "视觉", "外观", "模型", "配色", "颜色", "图标", "文字提示",
+		"招式名", "字幕", "粒子", "残影", "发光", "闪光", "描边", "透明度", "动画",
+		"放大", "缩小", "语音", "音效", "声音", "鸣笛", "亮出", "显示在",
+	]:
+		if text.contains(marker):
+			return true
+	return false
+
+static func ability_text_contains_internal_details(text: String) -> bool:
+	for marker in [
+		"可配置", "配置项", "配置页", "持久化", "实现原理", "内部判定", "开发术语",
+		"参数面板", "Schema", "schema",
+	]:
+		if text.contains(marker):
+			return true
+	return false
+
+static func ability_text_is_public_safe(text: String) -> bool:
+	return not ability_text_looks_corrupted(text) \
+		and not ability_text_contains_tuning_details(text) \
+		and not ability_text_contains_presentation_details(text) \
+		and not ability_text_contains_internal_details(text)
+
+static func sanitize_ability_text(text: String) -> String:
+	var sanitized := text
+	# Public copy stays free of invisible layout controls; UI nodes own wrapping.
+	for marker in [String.chr(0x200b), String.chr(0x2060), String.chr(0xfeff)]:
+		sanitized = sanitized.replace(marker, "")
+	return sanitized
+
+static func _complete_description_item(text: String) -> String:
+	var item := text.strip_edges()
+	if item.ends_with("。") or item.ends_with("！") or item.ends_with("？"):
+		return item
+	return "%s。" % item
+
 func audio_samples() -> Dictionary:
 	return _audio_samples.duplicate()
 
@@ -140,21 +245,36 @@ func _register_setting(key: String, raw_spec) -> void:
 	assert(spec.has("label") and spec.has("default"), "%s setting %s needs label/default" % [id, key])
 	spec["group"] = String(spec.get("group", "能力参数"))
 	spec["kind"] = String(spec.get("kind", "float"))
-	spec["min"] = float(spec.get("min", 0.0))
-	spec["max"] = float(spec.get("max", 10000.0))
-	spec["step"] = maxf(0.0001, float(spec.get("step", 1.0)))
+	assert(String(spec["kind"]) in ["float", "int", "text"], "%s setting %s has unsupported kind" % [id, key])
 	spec["order"] = int(spec.get("order", 1000))
-	assert(float(spec["max"]) >= float(spec["min"]), "%s setting %s has invalid range" % [id, key])
+	if String(spec["kind"]) == "text":
+		spec["multiline"] = bool(spec.get("multiline", false))
+		spec["max_length"] = maxi(1, int(spec.get("max_length", 1000)))
+	else:
+		spec["min"] = float(spec.get("min", 0.0))
+		spec["max"] = float(spec.get("max", 10000.0))
+		spec["step"] = maxf(0.0001, float(spec.get("step", 1.0)))
+		assert(float(spec["max"]) >= float(spec["min"]), "%s setting %s has invalid range" % [id, key])
 	spec["default"] = _normalize_setting_value(spec, spec["default"])
 	_setting_specs[key] = spec
 
 func _normalize_setting_value(spec: Dictionary, raw_value):
+	if String(spec["kind"]) == "text":
+		var fallback := sanitize_ability_text(String(spec.get("default", ""))).strip_edges()
+		var text_value := String(raw_value).strip_edges() if raw_value is String else fallback
+		text_value = sanitize_ability_text(text_value)
+		text_value = text_value.left(int(spec["max_length"]))
+		if text_value.is_empty() or ability_text_looks_corrupted(text_value):
+			return fallback
+		return text_value
 	var numeric := float(spec["default"])
 	if raw_value is int or raw_value is float:
 		numeric = float(raw_value)
 	numeric = clampf(numeric, float(spec["min"]), float(spec["max"]))
 	numeric = snappedf(numeric, float(spec["step"]))
-	return int(round(numeric)) if String(spec["kind"]) == "int" else numeric
+	if String(spec["kind"]) == "int":
+		return int(round(numeric))
+	return numeric
 
 func validation_errors() -> PackedStringArray:
 	var errors := PackedStringArray()
@@ -164,6 +284,16 @@ func validation_errors() -> PackedStringArray:
 		errors.append("%s display name is empty" % id)
 	if max_hp <= 0.0 or speed <= 0.0 or radius <= 0.0 or cooldown <= 0.0:
 		errors.append("%s has invalid positive numeric fields" % id)
+	if ability_description.strip_edges().is_empty():
+		errors.append("%s has no ability description" % id)
+	elif ability_text_looks_corrupted(ability_description):
+		errors.append("%s ability description contains probable mojibake" % id)
+	elif ability_text_contains_tuning_details(ability_description):
+		errors.append("%s ability description exposes tunable values" % id)
+	elif ability_text_contains_presentation_details(ability_description):
+		errors.append("%s ability description narrates visual or audio presentation" % id)
+	elif ability_text_contains_internal_details(ability_description):
+		errors.append("%s ability description exposes configuration or implementation details" % id)
 	if ability_script == null or not ability_script.can_instantiate():
 		errors.append("%s has no ability script" % id)
 	elif not ability_script.new() is BallAbility:

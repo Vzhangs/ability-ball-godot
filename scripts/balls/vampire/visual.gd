@@ -14,9 +14,7 @@ func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var pulse := 0.5 + sin(elapsed * 4.6) * 0.5
 
 	canvas.draw_circle(position, radius * 1.08, Color(0.48, 0.015, 0.08, 0.22 + pulse * 0.08))
-	canvas.draw_circle(position, radius, fighter.color)
-	canvas.draw_circle(position, radius * 0.78, Color("5b071b"))
-	canvas.draw_circle(position - facing * radius * 0.16, radius * 0.52, fighter.accent)
+	Surface.draw(canvas, position, radius, fighter.color, fighter.accent, Surface.Style.GRADIENT, context["elapsed"])
 	canvas.draw_arc(position, radius * 0.87, facing.angle() - 1.12, facing.angle() + 1.12, 24, Color("ff8a9c"), 2.1, true)
 
 	# Only the two white fangs protrude; their roots remain inside the presentation-only body edge.

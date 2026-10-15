@@ -9,15 +9,12 @@ func draw_ball(canvas: CanvasItem, _fighter, context: Dictionary) -> void:
 	var elapsed: float = context["elapsed"]
 	var pulse := 1.0 + sin(elapsed * 3.2) * 0.025
 	var body_color := Color("39f05f")
-	var body_shadow := Color("12a847")
 	var body_light := Color("a9ff76")
 	var outline := Color("d8ff67")
 
 	# A bright layered green body that stays readable beneath the health number.
 	canvas.draw_circle(position, radius * 1.2 * pulse, Color(0.28, 1.0, 0.38, 0.16))
-	canvas.draw_circle(position, radius, body_shadow)
-	canvas.draw_circle(position + Vector2(-radius * 0.08, -radius * 0.08), radius * 0.87, body_color)
-	canvas.draw_circle(position + Vector2(-radius * 0.25, -radius * 0.3), radius * 0.34, Color(0.72, 1.0, 0.45, 0.34))
+	Surface.draw(canvas, position, radius, body_color, outline, Surface.Style.GRADIENT, context["elapsed"])
 	canvas.draw_arc(position, radius, 0.0, TAU, 40, outline, maxf(2.5, radius * 0.1), true)
 
 	# A polished sprout emblem: dark stem for silhouette, luminous leaf fills and veins.

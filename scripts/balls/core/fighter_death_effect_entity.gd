@@ -2,11 +2,13 @@ class_name FighterDeathEffectEntity
 extends BallEntity
 
 ## Universal main-fighter death presentation. It owns no combat behavior and
-## derives animation time from the shared entity lifetime so it keeps playing
-## after the simulation has already decided the winner.
+## derives animation time from the shared entity lifetime. The effect stays
+## below active fighters so a relay replacement or a nearby survivor can never
+## be visually mistaken for another defeated fighter.
 
 const SHARD_COUNT := 18
 const RING_COUNT := 3
+const Glow := preload("res://scripts/balls/core/combat_glow.gd")
 
 var _duration := 1.2
 var _body_color := Color.WHITE
@@ -30,7 +32,7 @@ func _init(
 	_duration = maxf(0.05, duration)
 	remaining = _duration
 	tags = PackedStringArray(["fighter_death_vfx"])
-	draw_layer = 90
+	draw_layer = 0
 
 func animation_progress() -> float:
 	return clampf(1.0 - remaining / _duration, 0.0, 1.0)
@@ -42,6 +44,7 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	var center := screen_position(context)
 	var source_radius := _source_radius * context.scale_factor
 	var flash := clampf(1.0 - progress / 0.24, 0.0, 1.0)
+	Glow.halo(canvas, center, source_radius * (3.0 + eased * 2.0), Color(_accent_color, fade * 0.48))
 	if flash > 0.0:
 		canvas.draw_circle(center, source_radius * (1.5 + eased * 0.45), Color(1.0, 1.0, 1.0, flash * 0.18))
 		canvas.draw_circle(center, source_radius * (0.92 - eased * 0.28), Color(1.0, 1.0, 1.0, flash * 0.92))
@@ -66,6 +69,14 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 		)
 	for shard_index in range(SHARD_COUNT):
 		_draw_shard(canvas, center, source_radius, shard_index, eased, fade)
+	for spark_index in range(28):
+		var angle := float(spark_index) * 2.399963 + owner_side * 0.137
+		var direction := Vector2.from_angle(angle)
+		var reach := source_radius * (0.4 + eased * (2.0 + float(spark_index % 7) * 0.46))
+		var point := center + direction * reach
+		var spark_color := Color(_accent_color.lerp(Color.WHITE, 0.65), fade * 0.85)
+		Glow.halo(canvas, point, source_radius * 0.28, Color(spark_color, fade * 0.28))
+		canvas.draw_line(point - direction * source_radius * 0.18 * fade, point, spark_color, maxf(0.7, source_radius * 0.045 * fade), true)
 	var core_color := _accent_color.lerp(Color.WHITE, 0.58)
 	core_color.a = fade * 0.6
 	canvas.draw_circle(center, source_radius * maxf(0.04, 0.48 * (1.0 - eased)), core_color)

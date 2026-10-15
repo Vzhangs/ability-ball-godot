@@ -43,7 +43,7 @@ func step(battle, delta: float) -> void:
 	var start := pos
 	var finish := pos + velocity * delta
 	var hit_fraction := -1.0
-	var opponent = battle.opponent_for_side(owner_side)
+	var opponent = battle.opponent_for_entity(self)
 	if opponent != null:
 		hit_fraction = _segment_circle_hit_fraction(
 			start,
@@ -60,11 +60,12 @@ func step(battle, delta: float) -> void:
 		)
 		if entity_fraction >= 0.0 and (hit_fraction < 0.0 or entity_fraction < hit_fraction):
 			hit_fraction = entity_fraction
+	var travel_finish := start.lerp(finish, hit_fraction) if hit_fraction >= 0.0 else finish
+	pos = travel_finish
 	if hit_fraction >= 0.0:
-		pos = start.lerp(finish, hit_fraction)
 		_explode(battle)
 		return
-	pos = finish
+	pos = travel_finish
 	var arena_size: Vector2 = battle.arena_size()
 	var touched_wall := (
 		pos.x <= radius
@@ -147,8 +148,9 @@ func _explode(battle) -> void:
 	if removed:
 		return
 	removed = true
-	var source = battle.fighter_for_side(owner_side)
-	var opponent = battle.opponent_for_side(owner_side)
+
+	var source = battle.owner_for_entity(self)
+	var opponent = battle.opponent_for_entity(self)
 	if opponent != null and opponent.pos.distance_squared_to(pos) <= pow(_explosion_radius + opponent.radius, 2.0):
 		battle.damage(opponent, _damage, _accent_color, source)
 	for entity: BallEntity in battle.damageable_entities_in_circle(owner_side, pos, _explosion_radius):

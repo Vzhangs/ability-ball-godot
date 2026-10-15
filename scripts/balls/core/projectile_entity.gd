@@ -1,6 +1,8 @@
 class_name BallProjectileEntity
 extends BallEntity
 
+const Glow := preload("res://scripts/balls/core/combat_glow.gd")
+
 var damage_amount := 0.0
 var color := Color.WHITE
 var projectile_type := "generic"
@@ -53,9 +55,10 @@ func step(battle, delta: float) -> void:
 		if entity_fraction >= 0.0 and (target_fraction < 0.0 or entity_fraction < target_fraction):
 			target_fraction = entity_fraction
 			hit_entity = entity
+	var travel_finish := start.lerp(finish, target_fraction) if target_fraction >= 0.0 else finish
+	pos = travel_finish
 	if target_fraction >= 0.0:
-		pos = start.lerp(finish, target_fraction)
-		var source = battle.fighter_for_side(owner_side)
+		var source = battle.owner_for_entity(self)
 		if hit_entity == null and target != null:
 			battle.damage(target, damage_amount, color, source)
 		else:
@@ -64,7 +67,7 @@ func step(battle, delta: float) -> void:
 		battle.emit_combat_event("projectile_hit", 0.48)
 		removed = true
 		return
-	pos = finish
+	pos = travel_finish
 	var arena_size: Vector2 = battle.arena_size()
 	if remaining <= 0.0 or pos.x < -20.0 or pos.x > arena_size.x + 20.0 or pos.y < -20.0 or pos.y > arena_size.y + 20.0:
 		removed = true
@@ -73,10 +76,10 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	var scale_factor := context.scale_factor
 	var position := screen_position(context)
 	var draw_radius := radius * scale_factor
-	if is_captured() and velocity.length_squared() > 1.0:
+	if velocity.length_squared() > 1.0:
 		var tail_length := minf(34.0, velocity.length() * 0.09) * scale_factor
-		canvas.draw_line(position, position - velocity.normalized() * tail_length, Color(color.r, color.g, color.b, 0.58), maxf(1.5, draw_radius * 0.75), true)
-	canvas.draw_circle(position, draw_radius * 2.2, Color(color.r, color.g, color.b, 0.2))
+		Glow.streak(canvas, position - velocity.normalized() * tail_length, position, Color(color, 0.58), maxf(1.0, draw_radius * 0.60))
+	Glow.halo(canvas, position, draw_radius * 4.0, Color(color, 0.42))
 	canvas.draw_circle(position, draw_radius, color)
 	canvas.draw_circle(position, draw_radius * 0.42, Color.WHITE)
 	if is_captured():

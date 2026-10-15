@@ -1,5 +1,8 @@
 extends BallEntity
 
+func combat_category() -> Dictionary:
+	return {"id": "splitter_clone", "name": "分身"}
+
 const HEALTH_BARS_PER_ROW := 1
 const HEALTH_BAR_WIDTH := 40.0
 const HEALTH_BAR_HEIGHT := 2.0
@@ -112,6 +115,9 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	if _hit_flash > 0.0:
 		canvas.draw_circle(position, draw_radius, Color(1.0, 1.0, 1.0, _hit_flash * 0.7))
 
+func team_marker_world_height() -> float:
+	return radius * 1.28
+
 func draw_hud(canvas: CanvasItem, health_bar_bounds: Rect2) -> void:
 	if is_captured():
 		return
@@ -150,7 +156,9 @@ func receive_attack(
 	return applied
 
 func receive_collision_damage(battle, amount: float) -> float:
-	return _receive_damage(battle, amount)
+	var applied := _receive_damage(battle, amount)
+	battle.record_entity_health_loss(self, applied)
+	return applied
 
 func _receive_damage(battle, amount: float) -> float:
 	if removed or amount <= 0.0:
@@ -208,7 +216,9 @@ func _resolve_wall_collision(battle) -> void:
 		battle.spawn_particles(pos, _accent, 2, 48.0)
 
 func _resolve_fighter_collision(battle) -> void:
-	var target = battle.opponent_for_side(owner_side)
+	var target = battle.opponent_for_entity(self)
+	if target == null:
+		return
 	var offset: Vector2 = target.pos - pos
 	var minimum_distance: float = radius + target.radius
 	var distance := offset.length()
@@ -223,12 +233,12 @@ func _resolve_fighter_collision(battle) -> void:
 	if _contact_timer > 0.0:
 		return
 	_contact_timer = _contact_interval
-	var source = battle.fighter_for_side(owner_side)
-	battle.damage(target, _impact_damage, _accent, source)
+	var source = battle.owner_for_entity(self)
+	battle.damage(target, _impact_damage, _accent, source, true, self)
 	var target_side: int = battle.side_for_fighter(target)
 	var counter_damage: float = battle.contact_damage_for_side(target_side, self)
 	if counter_damage > 0.0:
-		battle.damage_entity(self, counter_damage, target.accent, target_side)
+		battle.damage_entity(self, counter_damage, target.accent, target_side, true, target)
 	if not removed:
 		receive_collision_damage(battle, _impact_wear)
 	battle.record_stat("clone_contact_hits")
@@ -271,13 +281,13 @@ func resolve_entity_collision(battle, other: BallEntity) -> void:
 		other,
 		outgoing_damage,
 		entity_contact_color(),
-		owner_side
+		owner_side, true, self
 	)
 	var damage_to_self: float = battle.damage_entity(
 		self,
 		incoming_damage,
 		other.entity_contact_color(),
-		other.owner_side
+		other.owner_side, true, other
 	)
 	if damage_to_other <= 0.0 and damage_to_self <= 0.0:
 		return

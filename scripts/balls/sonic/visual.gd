@@ -6,8 +6,7 @@ func trail_alpha() -> float:
 func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var position: Vector2 = context["position"]
 	var radius: float = context["radius"]
-	canvas.draw_circle(position, radius, fighter.color)
-	canvas.draw_circle(position, radius, fighter.accent, false, 2.4)
+	Surface.draw(canvas, position, radius, fighter.color, fighter.accent, Surface.Style.SOLID, context["elapsed"])
 	var direction := Vector2.from_angle(fighter.velocity.angle())
 	var tangent := Vector2(-direction.y, direction.x)
 	var bolt := PackedVector2Array([

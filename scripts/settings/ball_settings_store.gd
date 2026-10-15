@@ -2,7 +2,12 @@ class_name BallSettingsStore
 extends RefCounted
 
 const SETTINGS_PATH := "user://ability_ball_settings.json"
+const BOSS_SETTINGS_PATH := "user://ability_ball_boss_settings.json"
+const BattleSetupScript := preload("res://scripts/simulation/battle_setup.gd")
 const FORMAT_VERSION := 1
+
+static func settings_path_for_mode(mode: String) -> String:
+	return BOSS_SETTINGS_PATH if mode == BattleSetupScript.MODE_BOSS else SETTINGS_PATH
 
 static func load_settings(path: String = SETTINGS_PATH) -> Dictionary:
 	if not FileAccess.file_exists(path):

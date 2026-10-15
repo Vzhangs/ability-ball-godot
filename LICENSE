@@ -1,21 +1,30 @@
-MIT License
+Ability Ball Lab — 能力球
+Copyright (c) 2026 萝卜菌_Channel (Vzhangs)
 
-Copyright (c) 2026 Vzhangs
+本项目原创程序代码采用 GNU General Public License version 3 only（GPL-3.0-only）。
+完整许可证见同目录 COPYING。本文件中的署名要求依据 GPLv3 第 7(b) 条适用。
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+作者署名补充条款（GPLv3 §7(b)）
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+分发本项目或基于本项目的修改版本时，必须保留原作者署名、版权声明及许可证。
+在随分发提供的项目首页或主要说明文档，以及游戏的主菜单、启动页或关于界面中，
+应以清晰可读、合理醒目的方式保留以下作者信息和至少一个官方来源地址：
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+原作者：萝卜菌_Channel (Vzhangs)
+项目：Ability Ball Lab / 能力球
+https://github.com/Vzhangs/ability-ball-godot
+https://cnb.cool/vzhangs/ability-ball-godot
+
+新增作者可以同时标注自己的贡献，不得删除、掩盖原作者信息或暗示原作者为修改版背书。
+上述署名要求须在后续分发中继续保留。
+
+运行、学习、修改和再分发均须遵守 GPLv3；分发可运行文件时，应按 GPLv3 提供对应源码。
+第三方引擎、库、字体、角色及音频素材的权利和许可，仍以各自许可证或 NOTICE 为准。
+本许可不授予不属于原作者的商标、角色形象或第三方录音权利。
+已按其他许可合法取得的历史版本不因本文件而追溯变更授权。
+
+Exported videos / 导出视频
+项目原创视听内容允许用于录制、剪辑和发布视频。发布时须在视频中清晰、醒目地标注
+“游戏原作者：萝卜菌_Channel”，并提供至少一个上述官方项目链接；链接可放在简介。
+保留游戏自带作者水印即可满足视频内署名要求。第三方素材不因本授权取得额外权利。
+程序运行结果不因使用本程序而自动适用 GPLv3；本段是原创视听内容的单独使用授权。

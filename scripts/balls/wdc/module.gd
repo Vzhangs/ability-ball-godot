@@ -11,10 +11,10 @@ func _init() -> void:
 		"accent": "6de5ff",
 		"title_color": "c6f7ff",
 		"max_hp": 100.0,
-		"speed": 188.0,
+		"speed": 210.0,
 		"radius": 27.0,
 		"cooldown": 8.0,
-		"ability": "九宫格改写 · 区域碰撞伤害",
+		"ability": "WDC 会周期性把竞技场划分为九宫格，每格获得一个随机伤害值，并且高伤害格更罕见。\n\n• 技能期间，WDC 在哪一格撞到敌方主球或附属单位，就造成该格对应的伤害。\n• 九宫格结束后，WDC 的普通碰撞不再造成伤害。",
 		"sound_kind": "judgment",
 		"sort_order": 140,
 		"tuning": {

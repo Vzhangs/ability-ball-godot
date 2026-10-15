@@ -44,8 +44,8 @@ func _init(
 
 func step(battle, delta: float) -> void:
 	_elapsed += delta
-	var vampire = battle.fighter_for_side(owner_side)
-	var victim = battle.opponent_for_side(owner_side)
+	var vampire = battle.owner_for_entity(self)
+	var victim = battle.opponent_for_entity(self)
 	if vampire == null or victim == null or vampire.hp <= 0.0 or victim.hp <= 0.0:
 		removed = true
 		return

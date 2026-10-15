@@ -2,6 +2,7 @@ extends BallEntity
 
 const START_SCALE := 0.62
 const PEAK_SCALE := 1.58
+const CjkFontProviderScript := preload("res://scripts/ui/cjk_font_provider.gd")
 
 var _source
 var _symbol := ""
@@ -76,7 +77,7 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	var text_width := icon_radius * 1.55
 	var baseline := center + Vector2(-text_width * 0.5, font_size * 0.34)
 	canvas.draw_string(
-		ThemeDB.fallback_font,
+		CjkFontProviderScript.font(),
 		baseline + Vector2(2.0, 2.0),
 		_symbol,
 		HORIZONTAL_ALIGNMENT_CENTER,
@@ -85,7 +86,7 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 		Color(0.08, 0.01, 0.01, envelope * 0.62)
 	)
 	canvas.draw_string(
-		ThemeDB.fallback_font,
+		CjkFontProviderScript.font(),
 		baseline,
 		_symbol,
 		HORIZONTAL_ALIGNMENT_CENTER,

@@ -40,8 +40,8 @@ func activate(battle, fighter, opponent, side: int) -> void:
 	_fire_projectile(battle, fighter, opponent, side, fighter.pos)
 	var firing_cannons: Array[BallEntity] = _active_spawned_cannons()
 	for cannon: BallEntity in firing_cannons:
-		var cannon_fighter = battle.fighter_for_side(cannon.owner_side)
-		var cannon_opponent = battle.opponent_for_side(cannon.owner_side)
+		var cannon_fighter = battle.owner_for_entity(cannon)
+		var cannon_opponent = battle.opponent_for_entity(cannon)
 		if cannon_fighter == null or cannon_opponent == null:
 			continue
 		_fire_projectile(
@@ -49,7 +49,8 @@ func activate(battle, fighter, opponent, side: int) -> void:
 			cannon_fighter,
 			cannon_opponent,
 			cannon.owner_side,
-			cannon.pos
+			cannon.pos,
+			cannon
 		)
 	var volley_ratio := minf(1.0, float(firing_cannons.size()) / float(max_cannons()))
 	var volley_strength := 0.5 + 0.32 * volley_ratio
@@ -81,7 +82,7 @@ func _active_spawned_cannons() -> Array[BallEntity]:
 			result.append(cannon)
 	return result
 
-func _fire_projectile(battle, fighter, opponent, side: int, origin: Vector2) -> void:
+func _fire_projectile(battle, fighter, opponent, side: int, origin: Vector2, source_cannon: BallEntity = null) -> void:
 	var spread := settingf("projectile_spread")
 	var direction: Vector2 = (opponent.pos - origin).normalized().rotated(battle.random_range(-spread, spread))
 	battle.add_projectile(
@@ -92,5 +93,6 @@ func _fire_projectile(battle, fighter, opponent, side: int, origin: Vector2) -> 
 		settingf("projectile_damage"),
 		fighter.accent,
 		settingf("projectile_lifetime"),
-		"copy"
+		"copy",
+		source_cannon
 	)

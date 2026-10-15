@@ -1,0 +1,5 @@
+{
+  "host": "user@linux-host",
+  "runtime": "/home/user/.local/share/ability-ball-runtime",
+  "ssh_key": "~/.ssh/id_ed25519"
+}

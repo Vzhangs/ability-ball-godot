@@ -1,5 +1,9 @@
 extends BallEntity
 
+func combat_category() -> Dictionary:
+	var names := ["种子", "向日葵", "火豌豆射手", "冰豌豆射手", "豌豆机关枪"]
+	return {"id": "plant_" + form_name(), "name": names[int(_form)]}
+
 const PeaProjectileEntity := preload("res://scripts/balls/plant/pea_projectile_entity.gd")
 const SunPickupEntity := preload("res://scripts/balls/plant/sun_pickup_entity.gd")
 
@@ -112,6 +116,9 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 		_draw_health_bar(canvas, position, draw_radius, accent)
 	if _hit_flash > 0.0:
 		canvas.draw_circle(position, draw_radius, Color(1.0, 1.0, 1.0, _hit_flash * 0.65))
+
+func team_marker_world_height() -> float:
+	return radius * 1.9
 
 func growth_animation_progress() -> float:
 	if _form == GrowthForm.SEED or _growth_animation_duration <= 0.0:
@@ -564,7 +571,7 @@ func _current_projectile_damage() -> float:
 	return float(_config["gatling_pea_damage"])
 
 func _fire_projectile(battle) -> void:
-	var target = battle.opponent_for_side(owner_side)
+	var target = battle.opponent_for_entity(self)
 	if target == null:
 		return
 	var direction: Vector2 = (target.pos - pos).normalized()

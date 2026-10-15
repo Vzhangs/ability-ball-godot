@@ -1,6 +1,8 @@
 class_name BallVisual
 extends RefCounted
 
+const Surface := preload("res://scripts/balls/core/ball_surface.gd")
+
 var module: BallModule
 var ability: BallAbility
 
@@ -20,5 +22,4 @@ func draw_underlay(_canvas: CanvasItem, _fighter, _context: Dictionary) -> void:
 func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var position: Vector2 = context["position"]
 	var radius: float = context["radius"]
-	canvas.draw_circle(position, radius, fighter.color)
-	canvas.draw_circle(position, radius, fighter.accent, false, 2.2)
+	Surface.draw(canvas, position, radius, fighter.color, fighter.accent, Surface.Style.SOLID, context["elapsed"])

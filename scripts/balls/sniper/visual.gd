@@ -37,8 +37,7 @@ func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 		+ direction * radius * (muzzle_distance_multiplier - MUZZLE_LOCAL_FORWARD)
 		- direction * recoil
 	)
-	canvas.draw_circle(position, radius, BODY_DARK)
-	canvas.draw_circle(position, radius * 0.86, BODY_MID)
+	Surface.draw(canvas, position, radius, BODY_MID, fighter.accent, Surface.Style.METAL, context["elapsed"])
 	canvas.draw_arc(position, radius * 0.68, -PI * 0.1, PI * 1.18, 26, Color(fighter.accent.r, fighter.accent.g, fighter.accent.b, 0.48), maxf(1.5, radius * 0.08), true)
 	_draw_stock(canvas, gun_origin, direction, perpendicular, radius)
 	_draw_receiver(canvas, gun_origin, direction, perpendicular, radius, fighter.accent)

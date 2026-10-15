@@ -1,5 +1,8 @@
 extends BallEntity
 
+func combat_category() -> Dictionary:
+	return {"id": "heavy_tank", "name": "坦克"}
+
 const WALL_EPSILON := 0.00001
 const MAX_WALL_REVERSALS_PER_STEP := 4
 const MUZZLE_FLASH_DURATION := 0.12
@@ -105,6 +108,9 @@ func draw(canvas: CanvasItem, context: BallRenderContext) -> void:
 	if not is_captured():
 		_draw_health_bar(canvas, position, draw_radius, accent)
 
+func team_marker_world_height() -> float:
+	return radius * 1.9
+
 func participates_in_fighter_collision() -> bool:
 	return not removed and not is_captured()
 
@@ -186,13 +192,13 @@ func resolve_entity_collision(battle, other: BallEntity) -> void:
 		other,
 		damage_to_other,
 		entity_contact_color(),
-		owner_side
+		owner_side, true, self
 	)
 	var applied_to_self: float = battle.damage_entity(
 		self,
 		damage_to_self,
 		other.entity_contact_color(),
-		other.owner_side
+		other.owner_side, true, other
 	)
 	if applied_to_other <= 0.0 and applied_to_self <= 0.0:
 		return
@@ -241,7 +247,7 @@ func on_ownership_transferred(
 	_entity_contact_timers.clear()
 
 func _update_turret(battle, delta: float) -> void:
-	var target = battle.opponent_for_side(owner_side)
+	var target = battle.opponent_for_entity(self)
 	if target == null:
 		return
 	var target_direction: Vector2 = target.pos - pos

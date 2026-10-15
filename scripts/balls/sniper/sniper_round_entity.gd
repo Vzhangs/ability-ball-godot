@@ -67,7 +67,8 @@ func step(battle, delta: float) -> void:
 		travel_finish = start.lerp(finish, float(wall_hit["fraction"]))
 	var hits := _ordered_hits(battle, start, travel_finish)
 	for hit: Dictionary in hits:
-		pos = start.lerp(travel_finish, float(hit["fraction"]))
+		var hit_position := start.lerp(travel_finish, float(hit["fraction"]))
+		pos = hit_position
 		if String(hit["kind"]) == "fighter":
 			_hit_main_fighter(battle)
 			return
@@ -134,15 +135,16 @@ func absorption_visual_color() -> Color:
 
 func _ordered_hits(battle, start: Vector2, finish: Vector2) -> Array[Dictionary]:
 	var hits: Array[Dictionary] = []
-	var target = battle.opponent_for_side(owner_side)
-	var fighter_fraction := _segment_circle_hit_fraction(
-		start,
-		finish,
-		target.pos,
-		target.radius + radius
-	)
-	if fighter_fraction >= 0.0:
-		hits.append({"kind": "fighter", "fraction": fighter_fraction, "order": 1000000})
+	var target = battle.opponent_for_entity(self)
+	if target != null:
+		var fighter_fraction := _segment_circle_hit_fraction(
+			start,
+			finish,
+			target.pos,
+			target.radius + radius
+		)
+		if fighter_fraction >= 0.0:
+			hits.append({"kind": "fighter", "fraction": fighter_fraction, "order": 1000000})
 	var entity_order := 0
 	for entity: BallEntity in battle.damageable_entities(owner_side):
 		var entity_id := entity.get_instance_id()
@@ -200,8 +202,11 @@ func _hit_attachment(battle, entity: BallEntity) -> void:
 		battle.record_stat("sniper_rounds_depleted")
 
 func _hit_main_fighter(battle) -> void:
-	var target = battle.opponent_for_side(owner_side)
-	var source = battle.fighter_for_side(owner_side)
+	var target = battle.opponent_for_entity(self)
+	var source = battle.owner_for_entity(self)
+	if target == null:
+		removed = true
+		return
 	battle.damage(target, _remaining_damage, color, source)
 	battle.spawn_ring(pos, Color.WHITE, 6.0, 76.0, 0.28)
 	battle.spawn_particles(pos, color, 13, 245.0)

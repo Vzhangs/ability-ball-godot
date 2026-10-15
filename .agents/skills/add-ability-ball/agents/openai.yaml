@@ -1,0 +1,4 @@
+interface:
+  display_name: "设计与扩展能力球"
+  short_description: "在 Ability Ball Lab 中设计、重做并完整验收模块化能力球"
+  default_prompt: "使用 $add-ability-ball 在 Ability Ball Lab 中设计、重做并验证一个模块化能力球及其视听表现。"

@@ -50,14 +50,7 @@ func draw_ball(canvas: CanvasItem, fighter, context: Dictionary) -> void:
 	var gate_open_amount := _deployment_gate_open_amount()
 
 	# The factory shell stays frontal; its single deployment port rotates as one assembly.
-	canvas.draw_circle(position, radius, OUTER_BLACK)
-	canvas.draw_circle(position, radius * 0.93, BODY_SHADOW)
-	canvas.draw_circle(position, radius * 0.86, BODY_RED)
-	canvas.draw_circle(
-		position + Vector2(-radius * 0.11, -radius * 0.16),
-		radius * 0.67,
-		BODY_RED_LIGHT
-	)
+	Surface.draw(canvas, position, radius, BODY_RED, BODY_RED_LIGHT, Surface.Style.METAL, context["elapsed"])
 	_draw_side_exhaust_towers(canvas, position, radius)
 	_draw_central_tower(canvas, position, radius)
 	canvas.draw_circle(position, radius * 0.965, METAL_MID, false, maxf(2.8, radius * 0.105), true)

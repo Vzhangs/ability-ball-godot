@@ -5,6 +5,7 @@ const CELL_COUNT := GRID_SIZE * GRID_SIZE
 const LOW_COLOR := Color("2f72e8")
 const MID_COLOR := Color("ffd45f")
 const HIGH_COLOR := Color("ff4e5a")
+const CjkFontProviderScript := preload("res://scripts/ui/cjk_font_provider.gd")
 
 var _arena_size := Vector2.ONE
 var _values: Array[int] = []
@@ -106,7 +107,7 @@ func _draw_damage_value(
 	var baseline := Vector2(cell_rect.position.x, cell_rect.get_center().y + font_size * 0.34)
 	var text := str(value)
 	canvas.draw_string(
-		ThemeDB.fallback_font,
+		CjkFontProviderScript.font(),
 		baseline + Vector2(2.0, 2.0),
 		text,
 		HORIZONTAL_ALIGNMENT_CENTER,
@@ -117,7 +118,7 @@ func _draw_damage_value(
 	var text_color := cell_color.lerp(Color.WHITE, 0.52)
 	text_color.a = alpha * 0.92
 	canvas.draw_string(
-		ThemeDB.fallback_font,
+		CjkFontProviderScript.font(),
 		baseline,
 		text,
 		HORIZONTAL_ALIGNMENT_CENTER,

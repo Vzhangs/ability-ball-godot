@@ -11,10 +11,10 @@ func _init() -> void:
 		"accent": "f6d89a",
 		"title_color": "ffdca0",
 		"max_hp": 100.0,
-		"speed": 182.0,
+		"speed": 170.0,
 		"radius": 30.0,
-		"cooldown": 8.0,
-		"ability": "車炮象帅士 · 加权随机棋令",
+		"cooldown": 6.0,
+		"ability": "象棋球会从車、炮、象、帅、士中随机发动一项棋令。\n\n• 車：短暂蓄力后冲向敌人释放时的位置，沿途碾过附属单位，撞墙时还会爆发重击。\n• 炮：连续发射炮弹，命中后产生范围爆炸。\n• 象：进入无敌并移动到底部中央，随后沿菱形路线高速冲撞。\n• 帅：立即恢复生命，并在接下来的一段时间持续回血。\n• 士：召唤平均环绕的护卫，既能挡住攻击，也能撞击敌方主球和附属单位。",
 		"sound_kind": "judgment",
 		"sort_order": 190,
 		"tuning": {
@@ -48,11 +48,11 @@ func _init() -> void:
 			},
 			"rook_dash_speed": {
 				"label": "車突进速度", "group": "車", "suffix": " px/s",
-				"default": 720.0, "min": 40.0, "max": 2400.0, "step": 10.0, "order": 210,
+				"default": 680.0, "min": 40.0, "max": 2400.0, "step": 10.0, "order": 210,
 			},
 			"rook_damage": {
 				"label": "車主球撞击伤害", "group": "車",
-				"default": 20.0, "min": 0.0, "max": 500.0, "step": 0.5, "order": 220,
+				"default": 18.0, "min": 0.0, "max": 500.0, "step": 0.5, "order": 220,
 			},
 			"rook_entity_damage": {
 				"label": "車附属物碾压伤害", "group": "車",
@@ -80,7 +80,7 @@ func _init() -> void:
 			},
 			"cannon_damage": {
 				"label": "炮爆炸伤害", "group": "炮",
-				"default": 14.0, "min": 0.0, "max": 500.0, "step": 0.5, "order": 310,
+				"default": 10.0, "min": 0.0, "max": 500.0, "step": 0.5, "order": 310,
 			},
 			"cannon_explosion_radius": {
 				"label": "炮爆炸半径", "group": "炮", "suffix": " px",

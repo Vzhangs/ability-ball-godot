@@ -5,6 +5,7 @@ const BallBattleContextScript := preload("res://scripts/balls/core/ball_battle_c
 const BattleSetupScript := preload("res://scripts/simulation/battle_setup.gd")
 const FighterDeathEffectEntityScript := preload("res://scripts/balls/core/fighter_death_effect_entity.gd")
 const GlobalGameSettingsScript := preload("res://scripts/settings/global_game_settings.gd")
+const CombatLedgerScript := preload("res://scripts/logging/combat_ledger.gd")
 
 const DEFAULT_ARENA_SIZE := GlobalGameSettingsScript.DEFAULT_ARENA_SIZE
 const DEFAULT_BATTLE_TIME := GlobalGameSettingsScript.DEFAULT_BATTLE_TIME
@@ -92,7 +93,9 @@ class TeamState:
 		for ball_id in spec["roster"]:
 			var normalized_ball_id := String(ball_id)
 			roster.append(normalized_ball_id)
-			var maximum_hp := float(BallRegistry.get_module(normalized_ball_id).fighter_spec()["max_hp"])
+			var maximum_hp := (
+				float(BallRegistry.get_module(normalized_ball_id).fighter_spec()["max_hp"])
+			)
 			roster_max_hp.append(maximum_hp)
 			total_max_hp += maximum_hp
 		active_limit = int(spec["active_count"])
@@ -105,20 +108,11 @@ var visual_rng := RandomNumberGenerator.new()
 var _spawn_rng := RandomNumberGenerator.new()
 var seed_value := 20260815
 var battle_setup
+var mode_rules := {}
 var teams: Array[TeamState] = []
 var fighters: Array[FighterState] = []
 var fighter_history: Array[FighterState] = []
 var team_events: Array[Dictionary] = []
-
-# Read-only compatibility projections into the collection model.
-var left_id := ""
-var right_id := ""
-var left: FighterState
-var right: FighterState
-var left_module: BallModule
-var right_module: BallModule
-var left_ability: BallAbility
-var right_ability: BallAbility
 
 var elapsed := 0.0
 var finished := false
@@ -135,6 +129,11 @@ var contact_cooldown := CONTACT_COOLDOWN
 var collision_impulse := COLLISION_IMPULSE
 var trail_interval := TRAIL_INTERVAL
 var death_effect_duration := GlobalGameSettingsScript.DEFAULT_RESULT_REVEAL_DELAY
+var handoff_pause_duration_seconds := GlobalGameSettingsScript.DEFAULT_RELAY_HANDOFF_PAUSE
+var damage_number_duration_seconds := GlobalGameSettingsScript.DEFAULT_DAMAGE_NUMBER_DURATION
+
+const MAX_VISUAL_PARTICLES := 640
+const MAX_IMPACT_RINGS := 96
 
 var impact_rings: Array[Dictionary] = []
 var particles: Array[Dictionary] = []
@@ -145,33 +144,46 @@ var combat_events: Array[Dictionary] = []
 var camera_shake := 0.0
 
 var _trail_timer := 0.0
-# Legacy test hook; the live engine uses `_contact_timers` per fighter pair.
-var _contact_timer := 0.0
 var _next_fighter_uid := 1
 var _module_by_uid := {}
 var _ability_by_uid := {}
 var _contact_timers := {}
 var _pending_deaths: Array[FighterState] = []
 var _pending_death_uids := {}
+var _pending_replacements: Array[Dictionary] = []
+var _replacement_pause_remaining := 0.0
+var _world_stop_remaining := 0.0
+var _world_stop_source_fighter_uid := -1
 var _execution_fighter: FighterState
+var _combat_execution_entity: BallEntity
+var _combat_status_source: Dictionary = {}
+var combat_ledger = CombatLedgerScript.new()
 var stats := {}
 
 func _init(initial_seed: int, initial_left, initial_right = null, option_four = -1.0, option_five = DEFAULT_ARENA_SIZE) -> void:
 	if initial_left is Object and initial_left.get_script() == BattleSetupScript:
 		var setup_time := float(initial_right) if initial_right is float or initial_right is int else -1.0
 		var setup_arena := option_four as Vector2 if option_four is Vector2 else DEFAULT_ARENA_SIZE
-		reset_setup(initial_seed, initial_left, setup_time, setup_arena)
+		var setup_rules := option_five as Dictionary if option_five is Dictionary else {}
+		reset_setup(initial_seed, initial_left, setup_time, setup_arena, setup_rules)
 	else:
 		reset(initial_seed, String(initial_left), String(initial_right), float(option_four), option_five as Vector2)
 
 func reset(new_seed: int, new_left: String, new_right: String, time_limit_seconds: float = -1.0, battle_arena_size: Vector2 = DEFAULT_ARENA_SIZE) -> void:
 	reset_setup(new_seed, BattleSetupScript.duel(new_left, new_right), time_limit_seconds, battle_arena_size)
 
-func reset_setup(new_seed: int, requested_setup, time_limit_seconds: float = -1.0, battle_arena_size: Vector2 = DEFAULT_ARENA_SIZE) -> void:
+func reset_setup(
+	new_seed: int,
+	requested_setup,
+	time_limit_seconds: float = -1.0,
+	battle_arena_size: Vector2 = DEFAULT_ARENA_SIZE,
+	battle_mode_rules: Dictionary = {}
+) -> void:
 	assert(BallRegistry.is_valid(), "Ball registry is invalid: %s" % ", ".join(BallRegistry.validation_errors()))
 	assert(requested_setup != null and requested_setup.get_script() == BattleSetupScript, "Battle setup is required")
 	assert(requested_setup.is_valid(), "Invalid battle setup: %s" % ", ".join(requested_setup.validation_errors()))
 	battle_setup = BattleSetupScript.new(String(requested_setup.mode), requested_setup.teams.duplicate(true))
+	mode_rules = battle_mode_rules.duplicate(true)
 	_arena_size = Vector2(maxf(160.0, battle_arena_size.x), maxf(160.0, battle_arena_size.y))
 	seed_value = new_seed if new_seed != 0 else 20260815
 	max_battle_time = maxf(FIXED_STEP, time_limit_seconds if time_limit_seconds > 0.0 else DEFAULT_BATTLE_TIME)
@@ -199,7 +211,14 @@ func reset_setup(new_seed: int, requested_setup, time_limit_seconds: float = -1.
 	_contact_timers.clear()
 	_pending_deaths.clear()
 	_pending_death_uids.clear()
+	_pending_replacements.clear()
+	_replacement_pause_remaining = 0.0
+	_world_stop_remaining = 0.0
+	_world_stop_source_fighter_uid = -1
 	_execution_fighter = null
+	_combat_execution_entity = null
+	_combat_status_source = {}
+	combat_ledger = CombatLedgerScript.new()
 	_next_fighter_uid = 1
 	impact_rings.clear()
 	particles.clear()
@@ -216,7 +235,6 @@ func reset_setup(new_seed: int, requested_setup, time_limit_seconds: float = -1.
 		var team := teams[team_index]
 		for slot_index in range(team.active_limit):
 			_spawn_next_fighter(team, _initial_spawn_position(team_index, slot_index, team.active_limit))
-	_refresh_legacy_aliases()
 	for fighter in fighters.duplicate():
 		_start_fighter_ability(fighter)
 
@@ -238,7 +256,7 @@ func _spawn_next_fighter(team: TeamState, spawn_position: Vector2) -> FighterSta
 	var roster_index := team.next_roster_index
 	var ball_id := team.roster[roster_index]
 	var module: BallModule = BallRegistry.get_module(ball_id)
-	var spec: Dictionary = module.fighter_spec()
+	var spec: Dictionary = module.fighter_spec().duplicate(true)
 	var fighter := FighterState.new(_next_fighter_uid, team.team_id, roster_index, spec, spawn_position, _seeded_spawn_velocity(float(spec["speed"])), ABILITY_TIMER_OFFSET)
 	_next_fighter_uid += 1
 	team.next_roster_index += 1
@@ -246,6 +264,7 @@ func _spawn_next_fighter(team: TeamState, spawn_position: Vector2) -> FighterSta
 	team.last_fighter = fighter
 	fighters.append(fighter)
 	fighter_history.append(fighter)
+	combat_ledger.ensure_actor(_fighter_combat_identity(fighter))
 	_module_by_uid[fighter.fighter_uid] = module
 	_ability_by_uid[fighter.fighter_uid] = module.create_ability()
 	_clamp_fighter_to_arena(fighter)
@@ -284,8 +303,16 @@ func _clamp_fighter_to_arena(fighter: FighterState) -> void:
 func step(delta: float = FIXED_STEP) -> void:
 	delta = clampf(delta, 0.0, 0.05)
 	_update_transient_visuals(delta)
-	_update_entity_lifetimes(delta)
 	if finished:
+		# 对局结束后仍需让死亡碎片等揭晓演出自然收尾。
+		_update_entity_lifetimes(delta)
+		return
+	if _world_stop_remaining > 0.0:
+		_advance_world_stop(delta)
+		return
+	_update_entity_lifetimes(delta)
+	if not _pending_replacements.is_empty():
+		_advance_pending_replacements(delta)
 		return
 	elapsed += delta
 	_tick_contact_timers(delta)
@@ -328,6 +355,14 @@ func _update_fighter(fighter: FighterState, opponent: FighterState, ability: Bal
 	fighter.ability_timer -= delta
 	fighter.hit_flash = maxf(0.0, fighter.hit_flash - delta * 4.5)
 	var speed_multiplier := ability.speed_multiplier(battle_context, fighter, opponent, side)
+	var status_slow := 1.0
+	var status_haste := 1.0
+	for effect: BallStatusEffect in fighter.status_effects:
+		if effect.is_expired(): continue
+		var modifier := maxf(0.0, effect.fighter_speed_multiplier())
+		if modifier < 1.0: status_slow = minf(status_slow, modifier)
+		else: status_haste = maxf(status_haste, modifier)
+	speed_multiplier *= status_slow * status_haste
 	var target_minimum_speed := fighter.minimum_speed * speed_multiplier
 	var target_maximum_speed := fighter.maximum_speed * speed_multiplier
 	if fighter.velocity.length_squared() <= 0.001:
@@ -376,17 +411,17 @@ func _resolve_wall(fighter: FighterState) -> void:
 	if not bounced:
 		return
 	fighter.velocity = fighter.velocity.rotated(rng.randf_range(-0.035, 0.035))
-	spawn_particles(fighter.pos, fighter.accent, 3, 55.0)
 	emit_combat_event("wall_impact", clampf(fighter.velocity.length() / WALL_IMPACT_REFERENCE_SPEED, WALL_IMPACT_MIN_STRENGTH, WALL_IMPACT_MAX_STRENGTH))
 	var contact_position := fighter.pos
 	if vertical: contact_position.x = wall_x
 	if horizontal: contact_position.y = wall_y
+	spawn_particles(contact_position, fighter.accent, 6, 95.0)
+	spawn_ring(contact_position, fighter.accent, 3.0, 34.0, 0.30)
 	var opponent := nearest_hostile_fighter(fighter)
 	var ability := _ability_for_fighter(fighter)
 	if opponent != null and ability.after_wall_hit(battle_context, fighter, opponent, fighter.team_id, contact_position):
 		_record_ability(fighter.id)
-	for effect in fighter.status_effects.duplicate():
-		effect.on_wall_hit(battle_context, fighter)
+	_notify_status_wall_hit(fighter)
 
 func _resolve_fighter_collisions() -> void:
 	for first_index in range(fighters.size()):
@@ -395,13 +430,6 @@ func _resolve_fighter_collisions() -> void:
 		for second_index in range(first_index + 1, fighters.size()):
 			var second := fighters[second_index]
 			if second.hp > 0.0: _resolve_fighter_pair(first, second)
-
-func _resolve_collision() -> void:
-	if left == null or right == null:
-		return
-	if _contact_timer <= 0.0:
-		_contact_timers.erase(_fighter_pair_key(left, right))
-	_resolve_fighter_pair(left, right)
 
 func _resolve_fighter_pair(first: FighterState, second: FighterState) -> void:
 	var delta_pos := second.pos - first.pos
@@ -479,6 +507,7 @@ func _resolve_fighter_entity_collision(fighter: FighterState, ability: BallAbili
 		var impulse := -2.0 * relative_speed / total_inverse_mass
 		fighter.velocity -= normal * impulse
 		entity.velocity += normal * impulse * entity_inverse_mass
+	entity.combat_contact_source = _fighter_combat_identity(fighter)
 	if ability == null or not entity.can_resolve_fighter_contact(fighter_side): return
 	var fighter_damage := maxf(0.0, entity.entity_contact_damage())
 	var previous_scope := _set_execution_fighter(fighter)
@@ -488,7 +517,7 @@ func _resolve_fighter_entity_collision(fighter: FighterState, ability: BallAbili
 	var damage_to_entity := damage_entity(entity, entity_damage, fighter.accent, fighter_side) if entity_damage > 0.0 else 0.0
 	var entity_source := fighter_for_uid(entity.owner_fighter_uid)
 	if entity_source == null: entity_source = fighter_for_side(entity.owner_side)
-	if fighter_damage > 0.0: damage(fighter, fighter_damage, contact_color, entity_source)
+	if fighter_damage > 0.0: damage(fighter, fighter_damage, contact_color, entity_source, true, entity)
 	ability.after_entity_contact(battle_context, fighter, entity, damage_to_entity)
 	_set_execution_fighter(previous_scope)
 	stats["fighter_entity_contact_hits"] = int(stats["fighter_entity_contact_hits"]) + 1
@@ -507,29 +536,42 @@ func _update_ability(fighter: FighterState, opponent: FighterState, ability: Bal
 		_record_ability(fighter.id)
 	_set_execution_fighter(previous_scope)
 
-func damage(target: FighterState, amount: float, color: Color, source: FighterState, show_text: bool = true) -> float:
+func damage(target: FighterState, amount: float, color: Color, source: FighterState, show_text: bool = true, source_unit = null) -> float:
 	if target == null or target.hp <= 0.0: return 0.0
 	for effect in target.status_effects:
 		if effect.blocks_damage(battle_context, target, amount, source):
 			effect.on_damage_blocked(battle_context, target, source, show_text)
 			return 0.0
-	var applied := minf(target.hp, maxf(0.0, amount) * damage_scale)
+	var applied := minf(target.hp, _modified_incoming_damage(target, amount, source) * damage_scale)
 	target.hp = maxf(0.0, target.hp - applied)
 	target.hit_flash = 1.0
 	_record_damage_stats(target.team_id, source.team_id if source != null else -1, applied)
+	combat_ledger.record_damage(
+		_combat_source_identity(source, source.team_id if source != null else -1, source_unit),
+		_fighter_combat_identity(target), applied
+	)
 	if show_text and applied > 0.0:
-		spawn_text("-%d" % int(ceil(applied)), target.pos + Vector2(0.0, -target.radius - 6.0), color, 0.6)
+		spawn_text(
+			"-%d" % int(ceil(applied)),
+			target.pos + Vector2(0.0, -target.radius - 6.0),
+			color,
+			damage_number_duration_seconds,
+			"damage"
+		)
 	if source != null and applied > 0.0:
-		var source_ability := _ability_for_fighter(source)
-		if source_ability != null:
-			var previous_scope := _set_execution_fighter(source)
-			source_ability.after_damage_dealt(battle_context, source, target, applied)
-			_set_execution_fighter(previous_scope)
+		_notify_damage_dealt(source, target, applied)
 	if target.hp <= 0.0 and not _pending_death_uids.has(target.fighter_uid):
 		_pending_death_uids[target.fighter_uid] = true
 		_pending_deaths.append(target)
 		_spawn_fighter_death(target)
 	return applied
+
+func _modified_incoming_damage(target, amount: float, source) -> float:
+	var adjusted := maxf(0.0, amount)
+	for effect: BallStatusEffect in target.status_effects:
+		if not effect.is_expired():
+			adjusted = maxf(0.0, effect.modify_incoming_damage(battle_context, target, adjusted, source))
+	return adjusted
 
 func _record_damage_stats(target_team: int, source_team: int, amount: float) -> void:
 	var damage_to_team: Dictionary = stats["damage_to_team"]
@@ -547,15 +589,13 @@ func _spawn_fighter_death(fighter: FighterState) -> void:
 	effect.owner_fighter_uid = -2
 	add_entity(effect)
 	emit_combat_event("fighter_death", 1.0)
-	spawn_ring(fighter.pos, Color.WHITE, fighter.radius * 0.35, fighter.radius * 3.8, death_effect_duration * 0.72)
-	spawn_particles(fighter.pos, fighter.accent, 16, 230.0)
 	camera_shake = maxf(camera_shake, 10.0)
 	record_stat("fighter_deaths")
 
 func _process_pending_deaths() -> void:
 	if _pending_deaths.is_empty(): return
 	_pending_deaths.sort_custom(func(first: FighterState, second: FighterState): return first.fighter_uid < second.fighter_uid)
-	var replacements: Array[FighterState] = []
+	var queued_replacement := false
 	for dead_fighter in _pending_deaths:
 		if not fighters.has(dead_fighter): continue
 		var team := team_for_id(dead_fighter.team_id)
@@ -565,37 +605,178 @@ func _process_pending_deaths() -> void:
 		dead_fighter.status_effects.clear()
 		for entity in entities:
 			if entity.owner_fighter_uid == dead_fighter.fighter_uid: entity.removed = true
-		team_events.append({"kind": "fighter_defeated", "elapsed": elapsed, "team_id": team.team_id, "fighter_uid": dead_fighter.fighter_uid, "ball_id": dead_fighter.id})
-		if team.active_fighters.size() < team.active_limit and team.queued_count() > 0:
-			var replacement := _spawn_next_fighter(team, dead_fighter.pos)
-			if replacement != null:
-				replacements.append(replacement)
-				stats["fighter_replacements"] = int(stats["fighter_replacements"]) + 1
-				team_events.append({"kind": "fighter_replaced", "elapsed": elapsed, "team_id": team.team_id, "replaced_fighter_uid": dead_fighter.fighter_uid, "fighter_uid": replacement.fighter_uid, "ball_id": replacement.id, "position": replacement.pos})
-				emit_combat_event("fighter_replaced", 0.84)
+		team_events.append({
+			"kind": "fighter_defeated",
+			"elapsed": elapsed,
+			"team_id": team.team_id,
+			"team_name": team.display_name,
+			"fighter_uid": dead_fighter.fighter_uid,
+			"roster_index": dead_fighter.roster_index,
+			"ball_id": dead_fighter.id,
+			"display_name": dead_fighter.display_name,
+		})
+		var reserved_count := _pending_replacement_count(team.team_id)
+		if team.active_fighters.size() + reserved_count < team.active_limit \
+				and team.queued_count() > reserved_count:
+			var next_roster_index := team.next_roster_index + reserved_count
+			var next_ball_id := team.roster[next_roster_index]
+			var next_module: BallModule = BallRegistry.get_module(next_ball_id)
+			var replacement_request := {
+				"team_id": team.team_id,
+				"team_name": team.display_name,
+				"replaced_fighter_uid": dead_fighter.fighter_uid,
+				"defeated_roster_index": dead_fighter.roster_index,
+				"defeated_ball_id": dead_fighter.id,
+				"defeated_display_name": dead_fighter.display_name,
+				"next_roster_index": next_roster_index,
+				"next_ball_id": next_ball_id,
+				"next_display_name": next_module.display_name,
+				"position": dead_fighter.pos,
+			}
+			_pending_replacements.append(replacement_request)
+			queued_replacement = true
+			var queued_event := replacement_request.duplicate(true)
+			queued_event["kind"] = "fighter_replacement_queued"
+			queued_event["elapsed"] = elapsed
+			team_events.append(queued_event)
 	_pending_deaths.clear()
 	_pending_death_uids.clear()
 	_remove_finished_entities()
+	if queued_replacement:
+		_replacement_pause_remaining = maxf(
+			_replacement_pause_remaining,
+			maxf(death_effect_duration, handoff_pause_duration_seconds)
+		)
+	_mark_eliminated_teams()
+
+func _pending_replacement_count(team_id: int) -> int:
+	var count := 0
+	for request in _pending_replacements:
+		if int(request.get("team_id", -1)) == team_id:
+			count += 1
+	return count
+
+func pending_replacement_notices() -> Array[Dictionary]:
+	return _pending_replacements.duplicate(true)
+
+func replacement_pause_remaining() -> float:
+	return _replacement_pause_remaining
+
+func request_world_stop(duration: float, source: FighterState) -> bool:
+	var requested_duration := maxf(0.0, duration)
+	if finished or source == null or source.hp <= 0.0 or requested_duration <= 0.0:
+		return false
+	if (
+		requested_duration > _world_stop_remaining + 0.0001
+		or (
+			is_equal_approx(requested_duration, _world_stop_remaining)
+			and (
+				_world_stop_source_fighter_uid < 0
+				or source.fighter_uid < _world_stop_source_fighter_uid
+			)
+		)
+	):
+		_world_stop_source_fighter_uid = source.fighter_uid
+	_world_stop_remaining = maxf(_world_stop_remaining, requested_duration)
+	return true
+
+func world_stop_remaining() -> float:
+	return _world_stop_remaining
+
+func world_stop_source_fighter_uid() -> int:
+	return _world_stop_source_fighter_uid
+
+func _advance_world_stop(delta: float) -> void:
+	var stop_step := minf(delta, _world_stop_remaining)
+	var source := fighter_for_uid(_world_stop_source_fighter_uid)
+	if source != null and source.hp > 0.0:
+		var source_ability := _ability_for_fighter(source)
+		if source_ability != null:
+			var opponent := nearest_hostile_fighter(source)
+			var previous_scope := _set_execution_fighter(source)
+			source_ability.on_world_stop_step(
+				battle_context,
+				source,
+				opponent,
+				source.team_id,
+				stop_step
+			)
+			_set_execution_fighter(previous_scope)
+	_world_stop_remaining = maxf(0.0, _world_stop_remaining - stop_step)
+	camera_shake = maxf(0.0, camera_shake - stop_step * 16.0)
+	if _world_stop_remaining <= 0.0:
+		_world_stop_source_fighter_uid = -1
+
+func _advance_pending_replacements(delta: float) -> void:
+	_replacement_pause_remaining = maxf(0.0, _replacement_pause_remaining - delta)
+	if _replacement_pause_remaining > 0.0:
+		return
+	var requests: Array[Dictionary] = _pending_replacements.duplicate(true)
+	_pending_replacements.clear()
+	var replacements: Array[FighterState] = []
+	for request in requests:
+		var team := team_for_id(int(request.get("team_id", -1)))
+		if team == null or team.active_fighters.size() >= team.active_limit or team.queued_count() <= 0:
+			continue
+		var replacement := _spawn_next_fighter(team, request.get("position", Vector2.ZERO) as Vector2)
+		if replacement == null:
+			continue
+		replacements.append(replacement)
+		stats["fighter_replacements"] = int(stats["fighter_replacements"]) + 1
+		team_events.append({"kind": "fighter_replaced", "elapsed": elapsed, "team_id": team.team_id, "replaced_fighter_uid": int(request.get("replaced_fighter_uid", -1)), "fighter_uid": replacement.fighter_uid, "ball_id": replacement.id, "position": replacement.pos})
+		emit_combat_event("fighter_replaced", 0.84)
+	_mark_eliminated_teams()
+	for fighter in replacements:
+		_start_fighter_ability(fighter)
+	_check_finish()
+
+func _mark_eliminated_teams() -> void:
 	for team in teams:
-		if team.active_fighters.is_empty() and team.queued_count() == 0 and not team.eliminated:
+		if team.active_fighters.is_empty() and team.queued_count() == 0 \
+				and _pending_replacement_count(team.team_id) == 0 and not team.eliminated:
 			team.eliminated = true
 			stats["team_eliminations"] = int(stats["team_eliminations"]) + 1
 			team_events.append({"kind": "team_eliminated", "elapsed": elapsed, "team_id": team.team_id})
-	_refresh_legacy_aliases()
-	for fighter in replacements: _start_fighter_ability(fighter)
 
-func damage_entity(target: BallEntity, amount: float, color: Color, source_side: int, show_text: bool = true) -> float:
+func damage_entity(target: BallEntity, amount: float, color: Color, source_side: int, show_text: bool = true, source_unit = null) -> float:
 	if target == null or not target.can_receive_attack(source_side): return 0.0
-	var applied := target.receive_attack(battle_context, maxf(0.0, amount) * damage_scale, source_side, color)
-	if applied <= 0.0: return 0.0
-	if show_text: spawn_text("-%d" % int(ceil(applied)), target.pos + Vector2(0.0, -target.radius - 6.0), color, 0.6)
 	var source := _execution_fighter if _execution_fighter != null and _execution_fighter.team_id == source_side else fighter_for_side(source_side)
-	var ability := _ability_for_fighter(source)
-	if ability != null:
-		var previous_scope := _set_execution_fighter(source)
-		ability.after_damage_dealt(battle_context, source, null, applied)
-		_set_execution_fighter(previous_scope)
+	for effect: BallStatusEffect in target.status_effects:
+		if effect.blocks_damage(battle_context, target, amount, source):
+			effect.on_damage_blocked(battle_context, target, source, show_text)
+			return 0.0
+	var source_identity := _combat_source_identity(source, source_side, source_unit)
+	var target_identity := target.combat_identity()
+	var applied := target.receive_attack(battle_context, _modified_incoming_damage(target, amount, source) * damage_scale, source_side, color)
+	if applied <= 0.0: return 0.0
+	combat_ledger.record_damage(source_identity, target_identity, applied)
+	if show_text:
+		spawn_text(
+			"-%d" % int(ceil(applied)),
+			target.pos + Vector2(0.0, -target.radius - 6.0),
+			color,
+			damage_number_duration_seconds,
+			"damage"
+		)
+	_notify_damage_dealt(source, null, applied)
 	return applied
+
+func record_entity_health_loss(target: BallEntity, applied: float) -> void:
+	combat_ledger.record_damage({}, target.combat_identity(), applied)
+
+func _notify_damage_dealt(source: FighterState, target, applied: float) -> void:
+	var ability := _ability_for_fighter(source)
+	if ability == null:
+		return
+	var previous_scope := _set_execution_fighter(source)
+	var previous_entity := _combat_execution_entity
+	var previous_status := _combat_status_source
+	_combat_execution_entity = null
+	_combat_status_source = {}
+	ability.after_damage_dealt(battle_context, source, target, applied)
+	_combat_execution_entity = previous_entity
+	_combat_status_source = previous_status
+	_set_execution_fighter(previous_scope)
 
 func contact_damage_for_side(source_side: int, target) -> float:
 	var source := _execution_fighter if _execution_fighter != null and _execution_fighter.team_id == source_side else fighter_for_side(source_side)
@@ -609,7 +790,11 @@ func heal(fighter: FighterState, amount: float, allow_overheal: bool = false) ->
 	if applied <= 0.0: return 0.0
 	fighter.hp += applied
 	stats["healing"] = float(stats["healing"]) + applied
-	spawn_text("+%d" % int(ceil(applied)), fighter.pos + Vector2(0.0, -fighter.radius - 10.0), Color("60ff87"), 0.65)
+	combat_ledger.record_healing(
+		_combat_source_identity(_execution_fighter, _execution_fighter.team_id if _execution_fighter != null else -1),
+		_fighter_combat_identity(fighter), applied
+	)
+	spawn_text("+%d" % int(ceil(applied)), fighter.pos + Vector2(0.0, -fighter.radius - 10.0), Color("60ff87"), 0.65, "healing")
 	return applied
 
 func module_for_fighter(fighter: FighterState) -> BallModule:
@@ -621,11 +806,21 @@ func ability_for_fighter(fighter: FighterState) -> BallAbility:
 func _ability_for_fighter(fighter: FighterState) -> BallAbility:
 	return _ability_by_uid.get(fighter.fighter_uid) if fighter != null else null
 
-func _update_status_effects(fighter: FighterState, delta: float) -> void:
-	for index in range(fighter.status_effects.size() - 1, -1, -1):
-		var effect := fighter.status_effects[index]
-		effect.tick(battle_context, fighter, delta)
-		if effect.is_expired(): fighter.status_effects.remove_at(index)
+func _update_status_effects(target, delta: float) -> void:
+	for index in range(target.status_effects.size() - 1, -1, -1):
+		var effect: BallStatusEffect = target.status_effects[index]
+		var previous_source := _combat_status_source
+		_combat_status_source = effect.combat_source
+		effect.tick(battle_context, target, delta)
+		_combat_status_source = previous_source
+		if effect.is_expired(): target.status_effects.remove_at(index)
+
+func _notify_status_wall_hit(fighter: FighterState) -> void:
+	for effect: BallStatusEffect in fighter.status_effects.duplicate():
+		var previous_source := _combat_status_source
+		_combat_status_source = effect.combat_source
+		effect.on_wall_hit(battle_context, fighter)
+		_combat_status_source = previous_source
 
 func _preserves_external_velocity(fighter: FighterState) -> bool:
 	for effect in fighter.status_effects:
@@ -679,38 +874,72 @@ func _update_entity_lifetimes(delta: float) -> void:
 func _update_entities(delta: float) -> void:
 	for entity in entities.duplicate():
 		if entity.removed: continue
+		if not entity.is_captured():
+			_update_status_effects(entity, delta)
+		if entity.removed: continue
 		var previous_scope := _set_execution_fighter(fighter_for_uid(entity.owner_fighter_uid))
+		var previous_entity := _combat_execution_entity
+		_combat_execution_entity = entity
 		entity.process_step(battle_context, delta)
+		if not entity.combat_category().is_empty():
+			combat_ledger.ensure_actor(entity.combat_identity())
 		_set_execution_fighter(previous_scope)
+		_combat_execution_entity = previous_entity
 	_remove_finished_entities()
 
 func _remove_finished_entities() -> void:
 	for index in range(entities.size() - 1, -1, -1):
-		if entities[index].removed: entities.remove_at(index)
+		if entities[index].removed:
+			entities.remove_at(index)
 
 func spawn_ring(position: Vector2, color: Color, start_radius: float, end_radius: float, duration: float) -> void:
+	if duration <= 0.0:
+		return
+	if impact_rings.size() >= MAX_IMPACT_RINGS:
+		impact_rings.pop_front()
 	impact_rings.append({"pos": position, "color": color, "start_radius": start_radius, "end_radius": end_radius, "radius": start_radius, "duration": duration, "ttl": duration})
 
 func spawn_particles(position: Vector2, color: Color, count: int, speed: float) -> void:
-	for _index in range(count):
+	var visual_count := mini(ceili(float(maxi(0, count)) * 1.6), MAX_VISUAL_PARTICLES)
+	var overflow := maxi(0, particles.size() + visual_count - MAX_VISUAL_PARTICLES)
+	if overflow > 0:
+		particles = particles.slice(overflow)
+	for _index in range(visual_count):
 		var direction := Vector2.from_angle(visual_rng.randf_range(0.0, TAU))
 		var duration := visual_rng.randf_range(0.25, 0.62)
 		particles.append({"pos": position, "velocity": direction * visual_rng.randf_range(speed * 0.35, speed), "color": color, "size": visual_rng.randf_range(2.0, 5.0), "duration": duration, "ttl": duration})
 
-func spawn_text(text: String, position: Vector2, color: Color, duration: float) -> void:
-	floating_texts.append({"text": text, "pos": position, "color": color, "duration": duration, "ttl": duration})
+func spawn_text(text: String, position: Vector2, color: Color, duration: float, kind: String = "generic") -> void:
+	floating_texts.append({
+		"text": text,
+		"pos": position,
+		"color": color,
+		"duration": duration,
+		"ttl": duration,
+		"kind": kind,
+	})
 
 func add_beam(from: Vector2, to: Vector2, color: Color, duration: float, width: float) -> void:
 	beams.append({"from": from, "to": to, "color": color, "ttl": duration, "duration": duration, "width": width})
 
-func add_projectile(owner_side: int, position: Vector2, velocity: Vector2, radius: float, projectile_damage: float, color: Color, duration: float, type: String) -> void:
-	add_entity(BallProjectileEntity.new(owner_side, position, velocity, radius, projectile_damage, color, duration, type))
+func add_projectile(owner_side: int, position: Vector2, velocity: Vector2, radius: float, projectile_damage: float, color: Color, duration: float, type: String, source_unit: BallEntity = null) -> void:
+	var projectile := BallProjectileEntity.new(owner_side, position, velocity, radius, projectile_damage, color, duration, type)
+	if source_unit != null:
+		projectile.owner_fighter_uid = source_unit.owner_fighter_uid
+		projectile.combat_source = source_unit.combat_identity()
+	add_entity(projectile)
 	record_stat("projectiles_spawned")
 
 func add_entity(entity: BallEntity) -> BallEntity:
 	assert(entity != null, "Cannot add a null battle entity")
 	if entity.owner_fighter_uid == -1 and _execution_fighter != null and entity.owner_side == _execution_fighter.team_id:
 		entity.owner_fighter_uid = _execution_fighter.fighter_uid
+	if entity.combat_origin_fighter_uid < 0:
+		entity.combat_origin_fighter_uid = entity.owner_fighter_uid
+	if entity.combat_source.is_empty():
+		entity.combat_source = _combat_source_identity(fighter_for_uid(entity.owner_fighter_uid), entity.owner_side)
+	if not entity.combat_category().is_empty():
+		combat_ledger.ensure_actor(entity.combat_identity())
 	entities.append(entity)
 	return entity
 
@@ -726,23 +955,30 @@ func entity_list(owner_side: int = -1, tag: String = "") -> Array[BallEntity]:
 func count_entities(owner_side: int, tag: String) -> int:
 	return entity_list(owner_side, tag).size()
 
-func apply_status(target: FighterState, effect: BallStatusEffect) -> BallStatusEffect:
+func apply_status(target, effect: BallStatusEffect) -> BallStatusEffect:
+	assert(target != null, "Status effects require a target")
 	assert(effect != null and not effect.key.is_empty(), "Status effects require a stable key")
 	if effect.source_fighter_uid < 0 and _execution_fighter != null and effect.source_side == _execution_fighter.team_id:
 		effect.source_fighter_uid = _execution_fighter.fighter_uid
-	for existing in target.status_effects:
+	if effect.combat_source.is_empty():
+		effect.combat_source = _combat_source_identity(_historical_fighter(effect.source_fighter_uid), effect.source_side)
+	for existing: BallStatusEffect in target.status_effects:
 		if existing.key == effect.key:
 			existing.refresh_from(effect)
 			return existing
 	target.status_effects.append(effect)
 	return effect
 
-func has_status(target: FighterState, key_prefix: String) -> bool:
-	for effect in target.status_effects:
+func has_status(target, key_prefix: String) -> bool:
+	if target == null:
+		return false
+	for effect: BallStatusEffect in target.status_effects:
 		if effect.key.begins_with(key_prefix) and not effect.is_expired(): return true
 	return false
 
-func remove_status(target: FighterState, exact_key: String) -> bool:
+func remove_status(target, exact_key: String) -> bool:
+	if target == null:
+		return false
 	for index in range(target.status_effects.size() - 1, -1, -1):
 		if target.status_effects[index].key == exact_key:
 			target.status_effects.remove_at(index)
@@ -844,12 +1080,15 @@ func ray_to_arena_edge(origin: Vector2, direction: Vector2) -> Vector2:
 
 func _check_finish() -> void:
 	_process_pending_deaths()
+	if not _pending_replacements.is_empty():
+		return
 	var surviving_teams: Array[TeamState] = []
 	for team in teams:
 		if not team.eliminated: surviving_teams.append(team)
-	if surviving_teams.size() <= 1:
-		var winning_team := surviving_teams[0] if not surviving_teams.is_empty() else teams[0]
-		_set_winner(winning_team.team_id, "击败" if not surviving_teams.is_empty() else "同归于尽·阵营序判定")
+	if surviving_teams.is_empty():
+		_set_draw("同归于尽")
+	elif surviving_teams.size() == 1:
+		_set_winner(surviving_teams[0].team_id, "击败")
 	elif elapsed >= max_battle_time:
 		var timeout_winner := teams[0]
 		var best_ratio := -1.0
@@ -885,23 +1124,30 @@ func _set_winner(team_id: int, reason: String) -> void:
 	elif teams.size() > 1 and team_id == teams[1].team_id: winner_side = "right"
 	else: winner_side = str(team_id)
 	finish_reason = reason
-	team_events.append({"kind": "battle_finished", "elapsed": elapsed, "winner_team_id": team_id, "winner_name": winner_team.display_name if winner_team != null else "", "reason": reason})
+	team_events.append({"kind": "battle_finished", "elapsed": elapsed, "result": "win", "winner_team_id": team_id, "winner_name": winner_team.display_name if winner_team != null else "", "reason": reason})
 	if winner_fighter != null: spawn_ring(winner_fighter.pos, Color("ffe35c"), winner_fighter.radius, 260.0, 1.2)
+
+func _set_draw(reason: String) -> void:
+	if finished: return
+	finished = true
+	winner_team_id = -1
+	winner_id = ""
+	winner_side = ""
+	finish_reason = reason
+	team_events.append({
+		"kind": "battle_finished",
+		"elapsed": elapsed,
+		"result": "draw",
+		"winner_team_id": -1,
+		"winner_name": "",
+		"reason": reason,
+	})
+
+func is_draw() -> bool:
+	return finished and winner_team_id < 0
 
 func winner() -> FighterState:
 	return fighter_for_side(winner_team_id)
-
-func _refresh_legacy_aliases() -> void:
-	if teams.is_empty(): return
-	left = fighter_for_side(teams[0].team_id)
-	left_id = left.id if left != null else ""
-	left_module = module_for_fighter(left)
-	left_ability = _ability_for_fighter(left)
-	if teams.size() < 2: return
-	right = fighter_for_side(teams[1].team_id)
-	right_id = right.id if right != null else ""
-	right_module = module_for_fighter(right)
-	right_ability = _ability_for_fighter(right)
 
 func snapshot() -> Dictionary:
 	var fighter_snapshots: Array[Dictionary] = []
@@ -910,15 +1156,69 @@ func snapshot() -> Dictionary:
 	var team_snapshots: Array[Dictionary] = []
 	for team in teams:
 		team_snapshots.append({"team_id": team.team_id, "name": team.display_name, "active_limit": team.active_limit, "next_roster_index": team.next_roster_index, "queued_count": team.queued_count(), "eliminated": team.eliminated, "remaining_hp_ratio": team_remaining_hp_ratio(team)})
-	return {
+	var result := {
 		"elapsed": elapsed, "arena_size": _arena_size, "setup": battle_setup.snapshot(),
-		"finished": finished, "winner_id": winner_id, "winner_side": winner_side,
+		"pending_replacements": _pending_replacements.duplicate(true),
+		"replacement_pause_remaining": _replacement_pause_remaining,
+		"world_stop_remaining": _world_stop_remaining,
+		"world_stop_source_fighter_uid": _world_stop_source_fighter_uid,
+		"handoff_pause_duration_seconds": handoff_pause_duration_seconds,
+		"finished": finished, "is_draw": is_draw(), "winner_id": winner_id, "winner_side": winner_side,
 		"winner_team_id": winner_team_id, "fighters": fighter_snapshots, "teams": team_snapshots,
 		"team_events": team_events.duplicate(true),
-		"left_hp": left.hp if left != null else 0.0, "right_hp": right.hp if right != null else 0.0,
-		"left_pos": left.pos if left != null else Vector2.ZERO, "right_pos": right.pos if right != null else Vector2.ZERO,
-		"left_velocity": left.velocity if left != null else Vector2.ZERO, "right_velocity": right.velocity if right != null else Vector2.ZERO,
 		"left_clones": count_entities(teams[0].team_id, "clone") if not teams.is_empty() else 0,
 		"right_clones": count_entities(teams[1].team_id, "clone") if teams.size() > 1 else 0,
 		"projectiles": entity_list(-1, "projectile").size(), "stats": stats.duplicate(true),
+		"combat_report": combat_report(),
 	}
+	return result
+
+func _historical_fighter(uid: int) -> FighterState:
+	for fighter in fighter_history:
+		if fighter.fighter_uid == uid:
+			return fighter
+	return null
+
+func _fighter_combat_identity(fighter: FighterState) -> Dictionary:
+	if fighter == null:
+		return {}
+	return {"fighter_uid": fighter.fighter_uid, "team_id": fighter.team_id,
+		"category_id": "body", "category_name": "本体与技能", "origin_fighter_uid": fighter.fighter_uid}
+
+func _combat_source_identity(source: FighterState, source_side: int, source_unit = null) -> Dictionary:
+	if source_unit is Dictionary:
+		return source_unit.duplicate(true)
+	if source_unit is BallEntity:
+		return source_unit.combat_identity()
+	if source_unit is FighterState:
+		return _fighter_combat_identity(source_unit)
+	if not _combat_status_source.is_empty() \
+			and (source_side < 0 or int(_combat_status_source.get("team_id", -1)) == source_side):
+		return _combat_status_source.duplicate(true)
+	if _combat_execution_entity != null \
+			and (source_side < 0 or _combat_execution_entity.owner_side == source_side):
+		return _combat_execution_entity.combat_identity()
+	return _fighter_combat_identity(source)
+
+func combat_report() -> Dictionary:
+	var participants: Array[Dictionary] = []
+	for team in teams:
+		for roster_index in range(team.roster.size()):
+			var participant: FighterState = null
+			for fighter in fighter_history:
+				if fighter.team_id == team.team_id and fighter.roster_index == roster_index:
+					participant = fighter
+					break
+			var uid := participant.fighter_uid if participant != null else -1
+			var rows: Array[Dictionary] = combat_ledger.rows_for(uid)
+			for row in rows:
+				var origin := _historical_fighter(int(row["origin_fighter_uid"]))
+				row["controlled"] = origin != null and origin.fighter_uid != uid
+				row["origin_name"] = "%s·%s(%d号)" % [team_for_id(origin.team_id).display_name, origin.display_name, origin.roster_index + 1] if origin != null else ""
+			participants.append({"fighter_uid": uid, "team_id": team.team_id, "team_name": team.display_name,
+				"team_color": team.color.to_html(), "roster_index": roster_index,
+				"ball_id": String(team.roster[roster_index]),
+				"name": participant.display_name if participant != null else BallRegistry.get_module(team.roster[roster_index]).display_name,
+				"state": "未上场" if participant == null else ("落败" if participant.hp <= 0.0 else "存活"),
+				"rows": rows, "totals": combat_ledger.totals_for(uid)})
+	return {"version": 1, "fighters": participants}

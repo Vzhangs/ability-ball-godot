@@ -2,3 +2,14 @@
 builds/
 *.tmp
 .DS_Store
+__pycache__/
+addons/ability_mp4/
+
+artifacts/
+operations/
+*.pyc
+.env
+.env.*
+tools/production-host.local.json
+tools/autopilot.py
+tests/test_autopilot.py

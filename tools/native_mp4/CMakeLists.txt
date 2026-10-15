@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.22)
+project(ability_mp4 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(GODOTCPP_BUILD_PROFILE "${CMAKE_CURRENT_SOURCE_DIR}/build_profile.json" CACHE PATH "" FORCE)
+add_subdirectory("${GODOT_CPP_PATH}" godot-cpp)
+add_library(ability_mp4 SHARED writer.cpp)
+target_link_libraries(ability_mp4 PRIVATE godot-cpp)

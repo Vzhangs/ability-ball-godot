@@ -68,6 +68,8 @@ func _battle_payload(simulation: BattleSimulation) -> Dictionary:
 		"maximum_battle_seconds": simulation.max_battle_time,
 		"arena_size": _json_safe(simulation.arena_size()),
 		"finished": simulation.finished,
+		"result": "draw" if simulation.is_draw() else ("win" if simulation.finished else "pending"),
+		"is_draw": simulation.is_draw(),
 		"winner_id": simulation.winner_id,
 		"winner_side": simulation.winner_side,
 		"winner_team_id": simulation.winner_team_id,
@@ -83,14 +85,15 @@ func _battle_payload(simulation: BattleSimulation) -> Dictionary:
 			"trail_interval": simulation.trail_interval,
 		},
 		"participants": {
-			"left": _participant_payload(simulation.left, simulation.left_module, simulation.left_ability),
-			"right": _participant_payload(simulation.right, simulation.right_module, simulation.right_ability),
+			"left": _participant_payload(simulation.fighter_for_side(simulation.teams[0].team_id), simulation.module_for_fighter(simulation.fighter_for_side(simulation.teams[0].team_id)), simulation._ability_for_fighter(simulation.fighter_for_side(simulation.teams[0].team_id))),
+			"right": _participant_payload(simulation.fighter_for_side(simulation.teams[1].team_id), simulation.module_for_fighter(simulation.fighter_for_side(simulation.teams[1].team_id)), simulation._ability_for_fighter(simulation.fighter_for_side(simulation.teams[1].team_id))),
 			"fighters": _fighter_history_payload(simulation),
 		},
 		"teams": _json_safe(simulation.snapshot()["teams"]),
 		"team_events": _json_safe(simulation.team_events),
 		"snapshot": _json_safe(simulation.snapshot()),
 		"statistics": _json_safe(simulation.stats.duplicate(true)),
+		"combat_report": _json_safe(simulation.combat_report()),
 		"entities": _objects_payload(simulation.entities),
 		"visual_state": {
 			"impact_rings": _json_safe(simulation.impact_rings),
@@ -235,7 +238,7 @@ func _utc_timestamp() -> String:
 	return "%sZ" % Time.get_datetime_string_from_system(true, false)
 
 func _json_safe(value, depth: int = 0):
-	if depth >= 8:
+	if depth >= 8 and typeof(value) in [TYPE_DICTIONARY, TYPE_ARRAY]:
 		return str(value)
 	match typeof(value):
 		TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_FLOAT, TYPE_STRING:

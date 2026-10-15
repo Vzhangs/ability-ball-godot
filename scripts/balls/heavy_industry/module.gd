@@ -2,6 +2,7 @@ extends BallModule
 
 const AbilityScript := preload("res://scripts/balls/heavy_industry/ability.gd")
 const VisualScript := preload("res://scripts/balls/heavy_industry/visual.gd")
+const UnitReadyVoice := preload("res://scripts/balls/heavy_industry/audio/unit_ready.ogg")
 
 func _init() -> void:
 	super({
@@ -14,8 +15,14 @@ func _init() -> void:
 		"speed": 168.0,
 		"radius": 31.0,
 		"cooldown": 6.0,
-		"ability": "旋转出仓 · 直线巡弋坦克 · 独立炮塔",
-		"sound_kind": "track",
+		"ability": "重工球会沿当前朝向周期性生产坦克，场上的坦克能够持续集结。坦克沿出仓时的直线往返，撞墙后整车掉头并沿原路继续巡逻。\n\n• 坦克可以被敌人摧毁，车身碰撞会伤害敌方主球和附属单位。\n• 炮塔会主动追踪敌人并持续发射炮弹。",
+		"sound_kind": "heavy_industry_unit_ready",
+		"audio_samples": {
+			"heavy_industry_unit_ready": {
+				"stream": UnitReadyVoice,
+				"gain_db": -10.0,
+			},
+		},
 		"sort_order": 170,
 		"tuning": {
 			"port_rotation_speed": {
