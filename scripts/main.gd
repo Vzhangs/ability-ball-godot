@@ -64,6 +64,9 @@ var mode_selector: OptionButton
 var mode_profile_label: Label
 var mode_roster_editor
 var record_button: MenuButton
+var recording_output_row: HBoxContainer
+var recording_output_field: LineEdit
+var open_recording_folder_button: Button
 var procedural_audio: ProceduralBattleAudio
 var settings_dialog
 var global_settings_dialog
@@ -77,6 +80,7 @@ var _runtime_settings := {}
 var _runtime_global_settings := {}
 var _recording_process_id := 0
 var _recording_output_path := ""
+var _completed_recording_path := ""
 var _recording_previous_modified_time := 0
 var _mode_rosters := {}
 var _mode_team_names := {}
@@ -143,7 +147,11 @@ func _process(_delta: float) -> void:
 	var modified_time := FileAccess.get_modified_time(_recording_output_path) \
 		if FileAccess.file_exists(_recording_output_path) else 0
 	if modified_time > _recording_previous_modified_time:
-		result_label.text = "录制完成 · builds/%s" % _recording_output_path.get_file()
+		result_label.text = "录制完成"
+		_completed_recording_path = _recording_output_path
+		recording_output_field.text = _completed_recording_path
+		recording_output_field.tooltip_text = _completed_recording_path
+		recording_output_row.show()
 	else:
 		result_label.text = "录制失败 · 请检查 Godot / FFmpeg 输出"
 
@@ -561,6 +569,21 @@ func _build_controls() -> void:
 	record_button.get_popup().id_pressed.connect(_on_recording_fps_selected)
 	_update_recording_menu()
 	actions.add_child(record_button)
+	recording_output_row = HBoxContainer.new()
+	recording_output_row.name = "RecordingOutputRow"
+	recording_output_row.add_theme_constant_override("separation", 8)
+	recording_output_row.hide()
+	content.add_child(recording_output_row)
+	recording_output_field = LineEdit.new()
+	recording_output_field.name = "RecordingOutputPath"
+	recording_output_field.editable = false
+	recording_output_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	recording_output_field.add_theme_font_size_override("font_size", 13)
+	recording_output_row.add_child(recording_output_field)
+	open_recording_folder_button = _make_button("打开所在目录", Vector2(132.0, 42.0))
+	open_recording_folder_button.name = "OpenRecordingFolderButton"
+	open_recording_folder_button.pressed.connect(_open_recording_output_folder)
+	recording_output_row.add_child(open_recording_folder_button)
 	content.add_child(HSeparator.new())
 
 	var seed_row := HBoxContainer.new()
@@ -874,7 +897,17 @@ func _record_current_battle() -> void:
 		return
 	record_button.disabled = true
 	record_button.text = "录制中…"
+	_completed_recording_path = ""
+	recording_output_row.hide()
 	result_label.text = "正在后台录制本局…"
+
+func _open_recording_output_folder() -> void:
+	if _completed_recording_path.is_empty() or not FileAccess.file_exists(_completed_recording_path):
+		result_label.text = "视频文件已被移动或删除"
+		return
+	var error := OS.shell_show_in_file_manager(_completed_recording_path)
+	if error != OK:
+		result_label.text = "无法打开所在目录，请复制视频路径"
 
 func _video_output_path(video_seed: int, left_ball_id: String, right_ball_id: String, mode: String = BattleSetupScript.MODE_DUEL, rosters: String = "") -> String:
 	var output_slug := "ability-ball-seed-%d" % video_seed
