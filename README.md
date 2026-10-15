@@ -4,6 +4,8 @@
 
 [GitHub](https://github.com/Vzhangs/ability-ball-godot) · [CNB](https://cnb.cool/vzhangs/ability-ball-godot)
 
+QQ 群：**1127996649**（获取游戏本体、交流玩法）
+
 本项目采用 **GPL-3.0-only + GPLv3 第 7(b) 条作者署名要求**。可以运行、学习、修改和分发；分发源码、游戏包及修改版本时，须在醒目位置保留原作者信息、许可证和官方来源。分发游戏包须提供对应源码。发布视频请保留游戏作者署名，项目链接可放简介。完整条款见 [LICENSE](LICENSE)、[COPYING](COPYING) 与 [NOTICE](NOTICE)。
 
 Ability Ball Lab 是一个用 Godot 4 编写的原创程序化“能力球”战斗与短视频生产项目。一个或多个阵营可以各自携带有序阵容，并让一个或多个带有独立规则的主球在封闭竞技场中依靠初速度、墙面反弹、球体碰撞和显式技能自动战斗；画面、粒子和大部分音效由代码实时生成，个别角色化语音使用在对应球模块内声明、来源可追溯的真人或角色原声短采样。
@@ -449,6 +451,8 @@ macOS 入口 / Linux 生产主机：
 界面中的录制菜单和脚本共用同一条确定性生产链路。Mac 入口通过 `tools/production-host.local.json` 指定的 Linux 生产主机录制，将当前源码与参数快照交给该主机，使用原生 MP4 MovieWriter 将 1080×1920 RGB 帧直接送入 FFmpeg 编码，保留独立的 720×1280 逻辑母版、完整战斗和滚动战报。视频采用 H.264，音轨采用 AAC；不再生成 AVI，也不再对整段视频进行第二次压缩。封面单独提取为 `.cover.jpg`，视频首帧保持原始战斗画面。MP4 验证通过后自动下载到本机 `builds/`。
 
 首次使用录制需要准备 Godot、FFmpeg 和 `tools/native_mp4` 原生写入扩展。Linux 主机执行 `bash tools/native_mp4/build.sh` 构建扩展；macOS 可复制 `tools/production-host.example.json` 为 `tools/production-host.local.json`，填入自己的 Linux 主机、运行时目录和 SSH 密钥路径。本机配置不会提交到仓库。
+
+录制完成后，左侧会显示可选中复制的视频路径和“打开所在目录”按钮，点击按钮即可打开文件管理器并定位到视频文件。
 
 所有导出视频左上角全程显示半透明作者水印「开源游戏作者：萝卜菌_Channel」，与对战标题分行排列。
 
